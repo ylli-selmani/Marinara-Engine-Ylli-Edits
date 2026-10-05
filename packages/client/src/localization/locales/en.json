@@ -11925,7 +11925,6 @@
   "ui.ui.tagsuggestionpopup.alreadyWritten": "This tag is already written in the prompt and exists in the vocabulary.",
   "ui.ui.tagsuggestionpopup.customTag": "custom",
   "ui.ui.tagsuggestionpopup.tagSuggestions": "Tag suggestions",
-  "ui.ui.tagsuggestionpopup.writtenBadge": "written",
   "ui.ui.thinkingtagsinput.oneWrapperPerLine": "One wrapper per line.",
   "ui.ui.thinkingtagsinput.thinkingMarksTheHiddenReasoningSlotAndWillBe": "{{thinking}} marks the hidden reasoning slot and will be replaced by any content between the specified tags. Built-in think, thinking, thought, pipe, channel, and bracket pairs are already recognized.",
   "ui.ui.thinkingtagsinput.thinkingTags": "Thinking Tags",

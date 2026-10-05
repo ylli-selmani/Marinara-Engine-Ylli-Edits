@@ -8,23 +8,47 @@ import type { UseTagAutocompleteResult } from "../../hooks/use-tag-autocomplete"
 import { cn } from "../../lib/utils";
 
 /**
- * Category colors mirroring the booru tag types, keyed by the CSV `type` column.
+ * Chip styling per booru tag category, keyed by the CSV `type` column.
  *
- * These are intentionally literal palette values rather than theme tokens: the
- * color encodes the booru category, and users coming from a1111 tagcomplete read
- * these hues as meaning (character = red, copyright = amber, and so on). Theming
- * them would break that recognition. Same precedent as AgentEditor's icon colors.
+ * A colored name alone left the meaning unguessable, so each row carries a labeled
+ * pill instead. The colors stay literal palette values rather than theme tokens:
+ * they encode the booru category, and users coming from a1111 tagcomplete read
+ * these hues as meaning (artist = rose, copyright = amber, and so on). Theming
+ * them would break that recognition.
+ *
+ * The pills reuse `.mari-editor-chip`, the same class the lorebook, preset, and
+ * character tag chips use, so they match the rest of the app. General and unknown
+ * categories take the accent variant, which resolves through
+ * `--marinara-editor-accent` to `--marinara-chat-chrome-accent`.
  */
-const CATEGORY_COLORS: Record<number, string> = {
-  "-1": "text-[var(--muted-foreground)]",
-  0: "text-[var(--foreground)]",
-  1: "text-rose-400",
-  3: "text-amber-400",
-  4: "text-emerald-400",
-  5: "text-sky-400",
-  7: "text-violet-400",
-  8: "text-violet-400",
+const CATEGORY_CHIP_CLASS: Record<number, string> = {
+  1: "border-rose-400/40 bg-rose-400/15 text-rose-300",
+  3: "border-amber-400/40 bg-amber-400/15 text-amber-300",
+  4: "border-emerald-400/40 bg-emerald-400/15 text-emerald-300",
+  5: "border-sky-400/40 bg-sky-400/15 text-sky-300",
 };
+
+/**
+ * Human-readable category names, mirroring the booru numbering.
+ *
+ * Deliberately not localized for the well-known four: these are the Danbooru
+ * category names users already know, and the settings toggles carry the
+ * translated long forms.
+ */
+const CATEGORY_LABELS: Record<number, string> = {
+  0: "general",
+  1: "artist",
+  3: "copyright",
+  4: "character",
+  5: "meta",
+  7: "meta",
+  8: "meta",
+};
+
+/** Resolves a category to its pill label, falling back to the generic custom-tag copy. */
+function categoryLabel(category: number, t: (key: string) => string): string {
+  return CATEGORY_LABELS[category] ?? t("ui.ui.tagsuggestionpopup.customTag");
+}
 
 /**
  * Normalizes a tag name for the "you already wrote this" comparison.
@@ -271,23 +295,24 @@ export function TagSuggestionPopup({
             }}
             onMouseEnter={() => onHover(index)}
             className={cn(
-              "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors",
+              "flex w-full items-center gap-2 border-l-2 border-transparent px-3 py-1.5 text-left text-xs transition-colors",
               index === activeIndex ? "bg-[var(--accent)]" : "hover:bg-[var(--accent)]/60",
+              // The tag already written in the field is marked with an accent edge
+              // rather than a second pill, so the category pill below is always the
+              // only pill on the row and stays unambiguous.
+              isWritten && "border-l-[var(--marinara-chat-chrome-accent)]",
             )}
+            title={isWritten ? t("ui.ui.tagsuggestionpopup.alreadyWritten") : undefined}
           >
+            <span className="truncate font-medium text-[var(--foreground)]">{displayTagName(match.tag.name)}</span>
             <span
-              className={cn("truncate font-medium", CATEGORY_COLORS[match.tag.category] ?? "text-[var(--foreground)]")}
+              className={cn(
+                "mari-editor-chip shrink-0 px-1.5 py-px text-[0.5625rem] uppercase tracking-wide",
+                CATEGORY_CHIP_CLASS[match.tag.category] ?? "mari-editor-chip--accent",
+              )}
             >
-              {displayTagName(match.tag.name)}
+              {categoryLabel(match.tag.category, t)}
             </span>
-            {isWritten ? (
-              <span
-                className="shrink-0 rounded-sm px-1 text-[0.5625rem] font-semibold tracking-wide text-[var(--muted-foreground)] ring-1 ring-[var(--border)]"
-                title={t("ui.ui.tagsuggestionpopup.alreadyWritten")}
-              >
-                {t("ui.ui.tagsuggestionpopup.writtenBadge")}
-              </span>
-            ) : null}
             {match.matchedAlias ? (
               <span className="shrink-0 truncate text-[0.625rem] text-[var(--muted-foreground)]">
                 {displayTagName(match.matchedAlias)} →
