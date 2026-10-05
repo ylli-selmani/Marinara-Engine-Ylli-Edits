@@ -190,7 +190,7 @@ export function TagCsvImportDialog({ open, onClose }: { open: boolean; onClose: 
                     <span className="truncate font-medium">{tag.name.replace(/_/g, " ")}</span>
                     {tag.aliases.length > 0 ? (
                       <span className="shrink-0 text-[0.625rem] text-[var(--muted-foreground)]">
-                        {t("settings.tagAutocomplete.aliasCount", { count: tag.aliases.length })}
+                        {t("settings.tagAutocomplete.aliasCount", { count: tag.aliases.length })}{" "}
                       </span>
                     ) : null}
                     <span className="ml-auto shrink-0 text-[0.625rem] tabular-nums text-[var(--muted-foreground)]">
