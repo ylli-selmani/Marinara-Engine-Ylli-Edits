@@ -19,7 +19,7 @@ import { formatEstimatedTokens } from "../../lib/character-token-count";
 import { handleTextareaTab } from "../../lib/textarea-editing";
 import { useTagAutocomplete } from "../../hooks/use-tag-autocomplete";
 import { DecisionStatementNote } from "./DecisionStatementNote";
-import { TagSuggestionPopup } from "./TagSuggestionPopup";
+import { TagAutocompleteOverlay } from "./TagSuggestionPopup";
 import { Trans, useTranslation as useUiTranslation } from "react-i18next";
 
 type MacroDefinition = (typeof SUPPORTED_MACROS)[number];
@@ -384,11 +384,6 @@ export function MacroTextarea({
   const [expanded, setExpanded] = useState(false);
   const [showMacroRef, setShowMacroRef] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
-  const autocomplete = useTagAutocomplete({
-    onChange,
-    enabled: enableTagAutocomplete,
-    textareaRef,
-  });
 
   const handleExpandedClose = useCallback(() => {
     setExpanded(false);
@@ -402,19 +397,12 @@ export function MacroTextarea({
           ? formatOnChange(event.currentTarget, event.nativeEvent as InputEvent)
           : event.currentTarget.value,
       );
-      // The DOM value is already updated here, so the fragment can be read now.
-      requestAnimationFrame(autocomplete.refresh);
     },
-    [autocomplete, formatOnChange, onChange],
+    [formatOnChange, onChange],
   );
 
   const handleKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
-      // Tag completion consumes navigation keys only while its popup is open.
-      autocomplete.onKeyDown(event);
-      if (event.defaultPrevented) {
-        return;
-      }
       onKeyDown?.(event);
       if (event.defaultPrevented || event.key !== "Tab") {
         return;
@@ -422,8 +410,19 @@ export function MacroTextarea({
 
       handleTextareaTab(event);
     },
-    [autocomplete, onKeyDown],
+    [onKeyDown],
   );
+
+  // Completion wraps the handlers above instead of replacing them, so macro
+  // formatting and Tab indentation keep working while the popup is open.
+  const autocomplete = useTagAutocomplete({
+    value,
+    onChange,
+    enabled: enableTagAutocomplete,
+    textareaRef,
+    onKeyDown: handleKeyDown,
+    onChangeEvent: handleChange,
+  });
 
   const affordanceButtonClassName = cn(
     "rounded p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]",
@@ -454,10 +453,9 @@ export function MacroTextarea({
           <textarea
             ref={textareaRef}
             value={value}
-            onChange={handleChange}
+            {...autocomplete.textareaProps}
             onBlur={onBlur}
             onFocus={onFocus}
-            onKeyDown={handleKeyDown}
             rows={rows}
             aria-label={ariaLabel}
             aria-invalid={ariaInvalid || undefined}
@@ -548,16 +546,7 @@ export function MacroTextarea({
         formatOnChange={formatOnChange}
       />
       <MacrosReferenceModal open={showMacroRef} onClose={() => setShowMacroRef(false)} />
-      {autocomplete.matches.length > 0 && autocomplete.anchor !== null ? (
-        <TagSuggestionPopup
-          matches={autocomplete.matches}
-          activeIndex={autocomplete.activeIndex}
-          textareaRef={textareaRef}
-          caret={autocomplete.anchor}
-          onSelect={autocomplete.handleSelect}
-          onHover={autocomplete.setActiveIndex}
-        />
-      ) : null}
+      <TagAutocompleteOverlay autocomplete={autocomplete} textareaRef={textareaRef} />
     </>
   );
 }

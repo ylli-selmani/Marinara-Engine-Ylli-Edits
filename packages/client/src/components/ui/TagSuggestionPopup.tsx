@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import type { TagMatch } from "../../lib/tag-autocomplete";
 import { displayTagName } from "../../lib/tag-autocomplete";
+import type { UseTagAutocompleteResult } from "../../hooks/use-tag-autocomplete";
 import { cn } from "../../lib/utils";
 
 /**
@@ -203,5 +204,33 @@ export function TagSuggestionPopup({
       ))}
     </div>,
     document.body,
+  );
+}
+
+/**
+ * Renders nothing unless the given completion state has something to show.
+ *
+ * Convenience wrapper for callers that already hold a `useTagAutocomplete`
+ * result, so a tag field only needs to spread `textareaProps` and drop this
+ * component next to its textarea.
+ */
+export function TagAutocompleteOverlay({
+  autocomplete,
+  textareaRef,
+}: {
+  autocomplete: UseTagAutocompleteResult;
+  textareaRef?: Ref<HTMLTextAreaElement>;
+}) {
+  if (!autocomplete.isOpen || autocomplete.anchor === null) return null;
+
+  return (
+    <TagSuggestionPopup
+      matches={autocomplete.matches}
+      activeIndex={autocomplete.activeIndex}
+      textareaRef={textareaRef}
+      caret={autocomplete.anchor}
+      onSelect={autocomplete.handleSelect}
+      onHover={autocomplete.setActiveIndex}
+    />
   );
 }

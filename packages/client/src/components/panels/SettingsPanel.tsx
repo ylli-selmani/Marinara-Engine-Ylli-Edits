@@ -179,6 +179,7 @@ import { BackgroundPicker } from "./settings/BackgroundPicker";
 import { RequestTimeoutSettings } from "./settings/RequestTimeoutSettings";
 import { FEATURE_SWITCHES_CONTROL_ID, FeatureSwitchesSettings } from "./settings/FeatureSwitchesSettings";
 import { TAG_AUTOCOMPLETE_CONTROL_ID, TagAutocompleteSettings } from "./settings/TagAutocompleteSettings";
+import { TagAutocompleteTextarea } from "../ui/TagAutocompleteTextarea";
 import { CustomGenerationParametersSettings } from "./settings/CustomGenerationParametersSettings";
 import { ExternalExtensionsSettings, PersonalExtensionsSettings } from "./settings/PersonalExtensionsSettings";
 import { usePersonalExtensionPolicy, useSetExternalExtensionsEnabled } from "../../hooks/use-personal-extensions";
@@ -2398,10 +2399,10 @@ function ImageStyleProfilesEditor({
         <span className="mb-1 block text-[0.6875rem] font-medium text-[var(--muted-foreground)]">
           {localizeUi("ui.panels.imagestyleprofileseditor.styleText")}
         </span>
-        <textarea
+        <TagAutocompleteTextarea
           value={selected.styleText}
-          onChange={(event) => updateSelected({ styleText: event.target.value })}
-          className="min-h-20 w-full resize-y rounded-md border border-[var(--border)] bg-[var(--secondary)] px-2.5 py-2 text-xs leading-relaxed"
+          onChange={(styleText) => updateSelected({ styleText })}
+          className="min-h-20 rounded-md border px-2.5 py-2"
         />
       </label>
 
@@ -2410,20 +2411,20 @@ function ImageStyleProfilesEditor({
           <span className="mb-1 block text-[0.6875rem] font-medium text-[var(--muted-foreground)]">
             {localizeUi("ui.panels.imagestyleprofileseditor.positiveTags")}
           </span>
-          <textarea
+          <TagAutocompleteTextarea
             value={selected.positiveTags}
-            onChange={(event) => updateSelected({ positiveTags: event.target.value })}
-            className="min-h-24 w-full resize-y rounded-md border border-[var(--border)] bg-[var(--secondary)] px-2.5 py-2 text-xs leading-relaxed"
+            onChange={(positiveTags) => updateSelected({ positiveTags })}
+            className="min-h-24 rounded-md border px-2.5 py-2"
           />
         </label>
         <label className="block">
           <span className="mb-1 block text-[0.6875rem] font-medium text-[var(--muted-foreground)]">
             {localizeUi("ui.panels.imagestyleprofileseditor.negativeTags")}
           </span>
-          <textarea
+          <TagAutocompleteTextarea
             value={selected.negativeTags}
-            onChange={(event) => updateSelected({ negativeTags: event.target.value })}
-            className="min-h-24 w-full resize-y rounded-md border border-[var(--border)] bg-[var(--secondary)] px-2.5 py-2 text-xs leading-relaxed"
+            onChange={(negativeTags) => updateSelected({ negativeTags })}
+            className="min-h-24 rounded-md border px-2.5 py-2"
           />
         </label>
       </div>
@@ -2438,10 +2439,10 @@ function ImageStyleProfilesEditor({
               <span className="mb-1 block text-[0.625rem] font-medium capitalize text-[var(--muted-foreground)]">
                 {kind}
               </span>
-              <textarea
+              <TagAutocompleteTextarea
                 value={selected.subjectTags[kind] ?? ""}
-                onChange={(event) => updateSubjectTags(kind, event.target.value)}
-                className="min-h-14 w-full resize-y rounded-md border border-[var(--border)] bg-[var(--background)] px-2.5 py-2 text-xs leading-relaxed"
+                onChange={(tags) => updateSubjectTags(kind, tags)}
+                className="min-h-14 border bg-[var(--background)] px-2.5 py-2"
               />
             </label>
           ))}

@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ChangeEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type Ref,
 } from "react";
@@ -11,35 +12,63 @@ import {
 import { applyTagCompletion, getTagFragmentAtCaret, matchTags, type TagMatch } from "../lib/tag-autocomplete";
 import { useTagAutocompleteStore } from "../stores/tag-autocomplete.store";
 
-interface UseTagAutocompleteOptions {
-  onChange: (value: string) => void;
-  enabled: boolean;
-  textareaRef?: Ref<HTMLTextAreaElement>;
+/**
+ * Props to spread onto any `<textarea>` that should offer tag completion.
+ *
+ * The hook is deliberately renderer-agnostic: it never renders the popup itself,
+ * so a caller keeps full control of its own markup. Spread these onto the
+ * element and render `<TagSuggestionPopup>` with the returned matches.
+ */
+export interface TagAutocompleteTextareaProps {
+  onKeyDown: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
+  onChange: (event: ChangeEvent<HTMLTextAreaElement>) => void;
 }
 
-interface UseTagAutocompleteResult {
+interface UseTagAutocompleteOptions {
+  /** Current field value. Read at event time so callers stay in control of state. */
+  value: string;
+  onChange: (value: string) => void;
+  /** Per-field opt-in. Independent of the global setting. */
+  enabled?: boolean;
+  /** Ref to the textarea the popup should anchor to. */
+  textareaRef?: Ref<HTMLTextAreaElement>;
+  /** Existing keydown handler to preserve, e.g. MacroTextarea's Tab handling. */
+  onKeyDown?: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
+  /** Existing change handler to preserve. */
+  onChangeEvent?: (event: ChangeEvent<HTMLTextAreaElement>) => void;
+}
+
+export interface UseTagAutocompleteResult {
+  /** Suggestions to render; already empty when the popup should stay closed. */
   matches: TagMatch[];
   activeIndex: number;
-  /** Caret offset the popup anchors to; null when the popup is closed. */
+  /** Caret offset to anchor the popup to, or null when closed. */
   anchor: number | null;
-  onKeyDown: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
+  /** True when suggestions are currently available. */
+  isOpen: boolean;
   handleSelect: (match: TagMatch) => void;
   setActiveIndex: (index: number) => void;
-  /** Recompute suggestions after a change, from the live caret position. */
-  refresh: () => void;
+  /** Spread onto the textarea to wire completion without replacing existing handlers. */
+  textareaProps: TagAutocompleteTextareaProps;
 }
 
 /**
  * Drives tag completion for one textarea.
  *
- * Suggestions are recomputed on every keystroke from the fragment before the
- * caret. Matching runs against the in-memory vocabulary, which is small enough
- * (tens of thousands of tags) that a linear scan stays well under a frame.
+ * Suggestions are recomputed from the fragment before the caret. Matching runs
+ * against an in-memory vocabulary; the prefix index inside `matchTags` keeps a
+ * 125k-tag import under a millisecond per keystroke.
+ *
+ * Everything is inert unless a CSV has been imported, the global setting is on,
+ * and the caller opts this field in — so the hook is safe to call unconditionally.
  */
 export function useTagAutocomplete({
+  value,
   onChange,
-  enabled,
+  enabled = true,
   textareaRef,
+  onKeyDown,
+  onChangeEvent,
 }: UseTagAutocompleteOptions): UseTagAutocompleteResult {
   const tags = useTagAutocompleteStore((state) => state.tags);
   const storeEnabled = useTagAutocompleteStore((state) => state.enabled);
@@ -50,7 +79,12 @@ export function useTagAutocomplete({
   const [anchor, setAnchor] = useState<number | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
 
-  // Kept in a ref so keydown handlers read the current range without re-binding.
+  // Read the live value from the element rather than a captured prop, so the
+  // fragment is never computed against a stale render.
+  const valueRef = useRef(value);
+  valueRef.current = value;
+
+  // Kept in a ref so keydown handlers read the active range without re-binding.
   const rangeRef = useRef<{ start: number; end: number } | null>(null);
 
   const active = enabled && storeEnabled && tags.length > 0;
@@ -97,7 +131,7 @@ export function useTagAutocomplete({
       const range = rangeRef.current;
       if (!textarea || !range) return;
 
-      const result = applyTagCompletion(textarea.value, range, match.tag.name, { appendComma });
+      const result = applyTagCompletion(valueRef.current, range, match.tag.name, { appendComma });
       onChange(result.value);
 
       // Restore the caret after React commits the new value.
@@ -111,37 +145,52 @@ export function useTagAutocomplete({
     [appendComma, close, getTextarea, onChange],
   );
 
-  const onKeyDown = useCallback(
+  const handleKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
-      if (matches.length === 0) return;
-
-      switch (event.key) {
-        case "ArrowDown":
-          event.preventDefault();
-          setActiveIndex((index) => (index + 1) % matches.length);
-          return;
-        case "ArrowUp":
-          event.preventDefault();
-          setActiveIndex((index) => (index - 1 + matches.length) % matches.length);
-          return;
-        case "Enter":
-        case "Tab": {
-          const match = matches[activeIndex];
-          if (!match) return;
-          event.preventDefault();
-          handleSelect(match);
-          return;
+      if (matches.length > 0) {
+        switch (event.key) {
+          case "ArrowDown":
+            event.preventDefault();
+            setActiveIndex((index) => (index + 1) % matches.length);
+            return;
+          case "ArrowUp":
+            event.preventDefault();
+            setActiveIndex((index) => (index - 1 + matches.length) % matches.length);
+            return;
+          case "Enter":
+          case "Tab": {
+            const match = matches[activeIndex];
+            if (match) {
+              event.preventDefault();
+              handleSelect(match);
+              return;
+            }
+            break;
+          }
+          case "Escape":
+            event.preventDefault();
+            close();
+            return;
+          default:
+            // Let the keystroke land, then re-evaluate from the new caret.
+            requestAnimationFrame(refresh);
         }
-        case "Escape":
-          event.preventDefault();
-          close();
-          return;
-        default:
-          // Let the keystroke land, then re-evaluate from the new caret.
-          requestAnimationFrame(refresh);
       }
+
+      // Completion only consumes keys while its popup is open; everything else
+      // falls through to the caller's own handler.
+      onKeyDown?.(event);
     },
-    [activeIndex, close, handleSelect, matches, refresh],
+    [activeIndex, close, handleSelect, matches, onKeyDown, refresh],
+  );
+
+  const handleChange = useCallback(
+    (event: ChangeEvent<HTMLTextAreaElement>) => {
+      onChangeEvent?.(event);
+      // The DOM value is already updated here, so the fragment can be read now.
+      requestAnimationFrame(refresh);
+    },
+    [onChangeEvent, refresh],
   );
 
   // Close when the field loses the vocabulary or the feature is turned off.
@@ -149,13 +198,15 @@ export function useTagAutocomplete({
     if (!active) close();
   }, [active, close]);
 
+  const isOpen = active && anchor !== null && matches.length > 0;
+
   return {
     matches: anchor === null ? [] : matches,
     activeIndex,
     anchor,
-    onKeyDown,
+    isOpen,
     handleSelect,
     setActiveIndex,
-    refresh,
+    textareaProps: { onKeyDown: handleKeyDown, onChange: handleChange },
   };
 }
