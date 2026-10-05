@@ -8,6 +8,33 @@ import { clearStoredVocabulary, loadStoredVocabulary, saveStoredVocabulary } fro
 export type TagImportReport = Omit<ParsedTagCsv, "tags">;
 
 /**
+ * Categories offered as suggestions, following the Danbooru numbering.
+ *
+ * Filtering matters more than it looks: on a 125,865-tag export, general tags are
+ * only 24.7% of the vocabulary, while artists are 39.0% and characters 29.0%. Most
+ * prompt writing wants general tags, so disabling the other two removes roughly
+ * three quarters of the candidate set — fewer useless suggestions, and less work
+ * per keystroke.
+ */
+export const TAG_CATEGORY_OPTIONS = [
+  { category: 0, labelKey: "settings.tagAutocomplete.categoryGeneral" },
+  { category: 1, labelKey: "settings.tagAutocomplete.categoryArtist" },
+  { category: 3, labelKey: "settings.tagAutocomplete.categoryCopyright" },
+  { category: 4, labelKey: "settings.tagAutocomplete.categoryCharacter" },
+  { category: 5, labelKey: "settings.tagAutocomplete.categoryMeta" },
+] as const;
+
+/**
+ * General and artist are on by default; the rest are opt-in.
+ *
+ * Style presets are dominated by general tags and artist names, which is what
+ * people actually write in an image prompt. Characters and copyrights are usually
+ * noise there, and together they are 36% of a typical export, so defaulting them
+ * off makes the common case both quieter and cheaper. A category only appears in
+ * the settings when the imported CSV actually contains it.
+ */
+export const DEFAULT_ENABLED_CATEGORIES: number[] = [0, 1];
+/**
  * Holds the user-supplied tag vocabulary for booru-style autocomplete.
  *
  * Marinara ships no tag data, so this stays empty until the user imports a CSV.
@@ -20,6 +47,8 @@ interface TagAutocompleteState {
   enabled: boolean;
   /** Append ", " after an inserted tag. */
   appendComma: boolean;
+  /** Categories offered as suggestions. Everything is on until the user narrows it. */
+  enabledCategories: number[];
   /** Name of the imported CSV, for display only. */
   sourceName: string;
   /** Number of tags in the current vocabulary. */
@@ -34,6 +63,7 @@ interface TagAutocompleteState {
 
   setEnabled: (enabled: boolean) => void;
   setAppendComma: (appendComma: boolean) => void;
+  setCategoryEnabled: (category: number, enabled: boolean) => void;
   importCsv: (text: string, sourceName: string) => { count: number; report: TagImportReport };
   clearTags: () => void;
   /** Restores the vocabulary saved by a previous session. */
@@ -50,9 +80,21 @@ export const useTagAutocompleteStore = create<TagAutocompleteState>()(
       lastReport: null,
       hydrated: false,
       tags: [],
+      enabledCategories: [...DEFAULT_ENABLED_CATEGORIES],
 
       setEnabled: (enabled) => set({ enabled }),
       setAppendComma: (appendComma) => set({ appendComma }),
+
+      setCategoryEnabled: (category, enabled) =>
+        set((state) => {
+          const next = new Set(state.enabledCategories);
+          if (enabled) next.add(category);
+          else next.delete(category);
+          // Never let every category be switched off: that silently disables
+          // completion with no explanation, which reads as a broken feature.
+          if (next.size === 0) return {};
+          return { enabledCategories: [...next].sort((a, b) => a - b) };
+        }),
 
       importCsv: (text, sourceName) => {
         const { tags, ...report } = parseTagCsv(text);
@@ -88,6 +130,7 @@ export const useTagAutocompleteStore = create<TagAutocompleteState>()(
       partialize: (state) => ({
         enabled: state.enabled,
         appendComma: state.appendComma,
+        enabledCategories: state.enabledCategories,
       }),
     },
   ),

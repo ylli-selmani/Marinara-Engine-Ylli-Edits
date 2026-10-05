@@ -44,6 +44,13 @@ export interface UseTagAutocompleteResult {
   activeIndex: number;
   /** Caret offset to anchor the popup to, or null when closed. */
   anchor: number | null;
+  /**
+   * Normalized fragment currently being completed.
+   *
+   * Exposed so the popup can tell which suggestion is the text already written,
+   * and confirm it is real vocabulary rather than just the top-ranked guess.
+   */
+  query: string;
   /** True when suggestions are currently available. */
   isOpen: boolean;
   handleSelect: (match: TagMatch) => void;
@@ -75,6 +82,7 @@ export function useTagAutocomplete({
   const tags = useTagAutocompleteStore((state) => state.tags);
   const storeEnabled = useTagAutocompleteStore((state) => state.enabled);
   const appendComma = useTagAutocompleteStore((state) => state.appendComma);
+  const enabledCategories = useTagAutocompleteStore((state) => state.enabledCategories);
 
   const [query, setQuery] = useState("");
   const [anchor, setAnchor] = useState<number | null>(null);
@@ -88,7 +96,22 @@ export function useTagAutocomplete({
   // Kept in a ref so keydown handlers read the active range without re-binding.
   const rangeRef = useRef<{ start: number; end: number } | null>(null);
 
-  const active = enabled && storeEnabled && tags.length > 0;
+  /**
+   * The vocabulary restricted to the enabled categories.
+   *
+   * Filtering here rather than per match keeps one stable array identity, so the
+   * index cache is built once for the current selection instead of per keystroke.
+   */
+  const visibleTags = useMemo(() => {
+    if (enabledCategories.length === 0) return tags;
+    const allowed = new Set(enabledCategories);
+    // Most exports are dominated by artist and character tags, so this can remove
+    // three quarters of the vocabulary before any matching happens.
+    if (tags.every((tag) => allowed.has(tag.category))) return tags;
+    return tags.filter((tag) => allowed.has(tag.category));
+  }, [tags, enabledCategories]);
+
+  const active = enabled && storeEnabled && visibleTags.length > 0;
 
   /** Resolves the textarea from a possibly-callback ref. */
   const getTextarea = useCallback(
@@ -98,8 +121,8 @@ export function useTagAutocomplete({
 
   const matches = useMemo(() => {
     if (!active || !query) return [];
-    return matchTags(tags, query);
-  }, [active, query, tags]);
+    return matchTags(visibleTags, query);
+  }, [active, query, visibleTags]);
 
   const close = useCallback(() => {
     setQuery("");
@@ -248,6 +271,7 @@ export function useTagAutocomplete({
     matches: anchor === null ? [] : matches,
     activeIndex,
     anchor,
+    query,
     isOpen,
     handleSelect,
     setActiveIndex,

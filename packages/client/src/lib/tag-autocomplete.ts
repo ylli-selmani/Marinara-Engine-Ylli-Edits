@@ -14,6 +14,7 @@ import {
 
 export {
   displayTagName,
+  normalizeTagKey,
   normalizeTagQuery,
   parseTagCsv,
   parseTagCsvRecords,
@@ -38,26 +39,43 @@ export interface TagMatch {
 /**
  * Scores a candidate search key against a query. Higher is better; 0 means no match.
  *
- * Prefix matches outrank substring matches, and substring matches outrank
- * subsequence ("fuzzy") matches. Popular tags win ties via a small count bonus,
- * so `1girl` surfaces before an obscure tag with the same prefix.
+ * Two tiers, matching what established booru autocompletes do: a prefix hit beats a
+ * substring hit. Popular tags win ties via a small count bonus, so `1girl` surfaces
+ * before an obscure tag with the same prefix.
+ *
+ * There is deliberately no subsequence ("fuzzy") tier. It sounds helpful but on a
+ * real vocabulary it is noise: `bhl` subsequence-matches 988 tags and `ths` matches
+ * 6,093, because a long query is *easier* to scatter across a long tag. It produced
+ * `kingprotea_alter_(...)_(fate)` for `realistic`, and the best any ranking rule
+ * could do for `bhl` was `anus`. a1111-sd-webui-tagcomplete, the tool this feature
+ * is modelled on, does no fuzzy matching at all. A leading `*` gives the substring
+ * behaviour explicitly instead (see `normalizeTagQuery` callers).
  */
-export function scoreTagMatch(searchKey: string, query: string, postCount: number): number {
+export function scoreTagMatch(
+  searchKey: string,
+  query: string,
+  postCount: number,
+  options: { anywhere?: boolean } = {},
+): number {
   if (!query) return 0;
 
   const index = searchKey.indexOf(query);
-  let base = 0;
+  let base: number;
 
   if (index === 0) {
     // Prefix match: an exact prefix beats a longer partial one.
     base = 1000 - Math.min(searchKey.length - query.length, 200);
   } else if (index > 0) {
-    // Word-boundary substring beats a mid-word substring.
-    const isWordStart = /[^a-z0-9]/.test(searchKey[index - 1] ?? "");
-    base = (isWordStart ? 700 : 500) - Math.min(index, 100);
-  } else if (isSubsequence(query, searchKey)) {
-    // Fuzzy fallback: all query chars appear in order, e.g. "lngr" -> "long_hair".
-    base = 200 - Math.min(searchKey.length - query.length, 150);
+    // With `*` the user asked for the text anywhere, so where it sits stops
+    // mattering: a mid-word hit is scored as a prefix hit rather than being
+    // demoted. Without the marker, a word-boundary substring still beats a
+    // mid-word one.
+    if (options.anywhere) {
+      base = 1000 - Math.min(searchKey.length - query.length, 200);
+    } else {
+      const isWordStart = /[^a-z0-9]/.test(searchKey[index - 1] ?? "");
+      base = (isWordStart ? 700 : 500) - Math.min(index, 100);
+    }
   } else {
     return 0;
   }
@@ -67,27 +85,50 @@ export function scoreTagMatch(searchKey: string, query: string, postCount: numbe
   return base + popularity;
 }
 
-/** True when every character of `query` appears in `value` in order. */
-export function isSubsequence(query: string, value: string): boolean {
-  let queryIndex = 0;
-
-  for (let valueIndex = 0; valueIndex < value.length && queryIndex < query.length; valueIndex += 1) {
-    if (value[valueIndex] === query[queryIndex]) {
-      queryIndex += 1;
-    }
-  }
-
-  return queryIndex === query.length;
-}
-
 /** Prefix length used as the index bucket key. Two characters is the sweet spot. */
 const INDEX_PREFIX_LENGTH = 2;
 
+/**
+ * Match count above which the full sort is replaced by a bounded top-N selection.
+ *
+ * Ordinary queries return a handful of matches, where sorting everything is
+ * cheapest and simplest. Broad ones do not: on a 125k vocabulary `*a` yields 95,675
+ * matches and only 50 are ever shown, so ordering the rest is wasted work on the
+ * keystroke path. Kept well above the popup's own limit so only genuinely broad
+ * queries take the other branch.
+ */
+const SELECTION_THRESHOLD = 500;
+
+/**
+ * A leading `*` means "match anywhere", the convention a1111 tagcomplete uses.
+ *
+ * Without it every match is anchored at a word boundary, which is what makes the
+ * default list short and relevant. With it, `*hair` finds `long_hair`.
+ */
+export function parseTagQuery(rawQuery: string): { query: string; substring: boolean } {
+  const trimmed = rawQuery.trimStart();
+  const substring = trimmed.startsWith("*");
+  return { query: normalizeTagQuery(substring ? trimmed.slice(1) : trimmed), substring };
+}
+
 /** Map from a 1-2 character prefix to the tags starting with it. */
 export interface TagIndex {
+  /**
+   * Tags keyed by the first two characters of each name/alias. Reaches every
+   * *prefix* match, plus the substring matches whose text happens to start the key.
+   */
   byPrefix: Map<string, TagRecord[]>;
-  /** Tags whose name or alias contains a given pair, grouped by its first character. */
-  byOpeningChar: Map<string, TagRecord[]>;
+  /**
+   * Tags keyed by every two-character pair appearing anywhere in a name/alias.
+   *
+   * A substring match does NOT have to start at the key's beginning: `hair` matches
+   * `long_hair`, whose first pair is `lo`. Keying candidates only by the key's own
+   * prefix therefore makes such matches unreachable — measured on a 125k vocabulary,
+   * `hair` found 149 of its 827 matches and never surfaced `long_hair`, the most
+   * common hair tag. Every substring of length >= 2 must contain the query's first
+   * pair somewhere, so this map is a sound candidate set for substring queries.
+   */
+  byBigram: Map<string, TagRecord[]>;
   /** Every tag whose name or alias is shorter than the prefix length. */
   short: TagRecord[];
   tags: readonly TagRecord[];
@@ -96,18 +137,19 @@ export interface TagIndex {
 /**
  * Indexes a vocabulary for fast candidate lookup.
  *
- * Three structures cooperate:
- * - `byPrefix`: tags whose name or alias starts with a 2-char prefix.
- * - `short`: tags with no key long enough to bucket, kept disjoint from buckets.
- * - `byOpeningChar`: tags containing a 2-char pair, grouped by that pair's first
- *   character, used to reach fuzzy matches without scanning the whole vocabulary.
+ * `byPrefix` and `byBigram` partition candidate discovery by how a query can match;
+ * `short` holds tags with no key long enough to bucket. Lists are deduplicated so a
+ * tag reached through its name and an alias is not scored twice.
  *
- * A tag is either short-keyed or bucketed, never both, so concatenating those
- * two cannot yield the same tag twice.
+ * The index exists because a 125k-tag vocabulary is queried on every keystroke;
+ * tagcomplete filters a plain array, which suits its scale but not ours. Measured
+ * cost at 125,865 tags: ~30ms for the prefix map, ~450ms and ~14MB for the bigram
+ * map, which buys 2ms substring queries instead of 14ms and full recall instead of
+ * a fifth of it. That is a deliberate trade against a one-off import cost.
  */
 export function createTagIndex(tags: readonly TagRecord[]): TagIndex {
   const byPrefix = new Map<string, TagRecord[]>();
-  const byOpeningChar = new Map<string, TagRecord[]>();
+  const byBigram = new Map<string, TagRecord[]>();
   const short: TagRecord[] = [];
   const seenShort = new Set<TagRecord>();
 
@@ -115,32 +157,29 @@ export function createTagIndex(tags: readonly TagRecord[]): TagIndex {
   // tag and turns the build quadratic — 26s over a 126k-tag vocabulary — so the
   // dedupe uses these instead, keeping the build a single linear pass.
   const prefixSeen = new Map<string, Set<TagRecord>>();
+  const bigramSeen = new Map<string, Set<TagRecord>>();
 
-  const addToBucket = (key: string, tag: TagRecord) => {
-    let bucket = byPrefix.get(key);
-    let members = prefixSeen.get(key);
+  const addTo = (
+    map: Map<string, TagRecord[]>,
+    membership: Map<string, Set<TagRecord>>,
+    key: string,
+    tag: TagRecord,
+  ) => {
+    let bucket = map.get(key);
+    let members = membership.get(key);
 
     if (!bucket || !members) {
       bucket = [];
       members = new Set();
-      byPrefix.set(key, bucket);
-      prefixSeen.set(key, members);
+      map.set(key, bucket);
+      membership.set(key, members);
     }
 
-    // A tag can reach the same bucket through its name and an alias that share
-    // a 2-char prefix; keep one entry so it is not scored twice.
+    // A tag can reach the same bucket more than once, through its name and an
+    // alias sharing the pair; keep one entry so it is not scored twice.
     if (members.has(tag)) return;
     members.add(tag);
     bucket.push(tag);
-  };
-
-  const addToOpeningChar = (opening: string, tag: TagRecord) => {
-    const group = byOpeningChar.get(opening);
-    if (group) {
-      group.push(tag);
-    } else {
-      byOpeningChar.set(opening, [tag]);
-    }
   };
 
   for (const tag of tags) {
@@ -148,22 +187,21 @@ export function createTagIndex(tags: readonly TagRecord[]): TagIndex {
     // otherwise its long keys already make it reachable through a bucket.
     let hasLongKey = false;
 
-    // Openings already recorded for this tag, so it is listed once per opening
-    // character however many distinct pairs it contributes. Scoped per tag to
-    // keep the bookkeeping proportional to one tag rather than the vocabulary.
-    const openings = new Set<string>();
+    // Pairs already recorded for this tag, so a key repeating a pair does not
+    // re-add it. Scoped per tag to keep the bookkeeping proportional to one tag.
+    const pairs = new Set<string>();
 
     for (const key of tag.searchKeys) {
       if (key.length >= INDEX_PREFIX_LENGTH) {
         hasLongKey = true;
-        addToBucket(key.slice(0, INDEX_PREFIX_LENGTH), tag);
+        addTo(byPrefix, prefixSeen, key.slice(0, INDEX_PREFIX_LENGTH), tag);
       }
 
       for (let position = 0; position < key.length - 1; position += 1) {
-        const opening = key[position]!;
-        if (openings.has(opening)) continue;
-        openings.add(opening);
-        addToOpeningChar(opening, tag);
+        const pair = key.slice(position, position + INDEX_PREFIX_LENGTH);
+        if (pairs.has(pair)) continue;
+        pairs.add(pair);
+        addTo(byBigram, bigramSeen, pair, tag);
       }
     }
 
@@ -173,28 +211,25 @@ export function createTagIndex(tags: readonly TagRecord[]): TagIndex {
     }
   }
 
-  return { byPrefix, byOpeningChar, short, tags };
+  return { byPrefix, byBigram, short, tags };
 }
 
 /**
  * Narrows a query to the tags worth scoring.
  *
- * The bucket alone is not a sound candidate set: it holds prefix/substring hits,
- * but a fuzzy subsequence ("lngr" -> "long_hair") can live in any bucket, and
- * popular query prefixes fill their bucket while rare ones barely fill it. Gating
- * on bucket size therefore both drops results and, when the bucket looks sparse,
- * falls back to scanning the whole vocabulary on every keystroke.
- *
- * Instead the candidate set is always the union of three cheap, sound sources:
- * the query's bucket (prefix and substring hits), the short-key list, and the
- * tags containing the query's first character, which is where every subsequence
- * match must start.
+ * A match can begin anywhere in a key, so the prefix bucket alone is not a sound
+ * candidate set: `hair` matches `long_hair`, which is filed under `lo`. The bigram
+ * map covers that case, because any substring of length >= 2 contains the query's
+ * first pair somewhere. The two lists are unioned, with `short` for keys too brief
+ * to bucket, so no match is reachable only by scanning the vocabulary.
  */
 function collectCandidates(tags: readonly TagRecord[], query: string): readonly TagRecord[] {
+  // A one-character query is below the bigram's resolution: it matches most of the
+  // vocabulary, so there is no bucket to narrow by and every tag has to be scored.
   if (query.length < INDEX_PREFIX_LENGTH) return tags;
 
   const index = getOrBuildIndex(tags);
-  const bucket = index.byPrefix.get(query.slice(0, INDEX_PREFIX_LENGTH));
+  const pair = query.slice(0, INDEX_PREFIX_LENGTH);
 
   const candidates: TagRecord[] = [];
   const seen = new Set<TagRecord>();
@@ -205,35 +240,11 @@ function collectCandidates(tags: readonly TagRecord[], query: string): readonly 
     candidates.push(tag);
   };
 
-  // Bucket entries are guaranteed prefix/substring hits.
-  if (bucket) for (const tag of bucket) add(tag);
+  // Every candidate contains the query's first pair, so this one list is both a
+  // superset of the prefix bucket and the sound set for substring matches.
+  const paired = index.byBigram.get(pair);
+  if (paired) for (const tag of paired) add(tag);
   for (const tag of index.short) add(tag);
-
-  // For a two-character query, "is a subsequence of" and "contains" coincide, so
-  // the bucket already holds every match (`short` covers tags too brief to
-  // bucket). Skipping the fuzzy scan here avoids walking the first character's
-  // list — most of the vocabulary — on every two-key stroke.
-  if (query.length < 3) return candidates;
-
-  // Fuzzy matches are reached through the pairs that begin with the query's
-  // first character, which is a sound bound: every subsequence match must start
-  // with that character, so it appears in some pair starting with it. Pair lists
-  // stay discriminating where character lists do not — "h" is in roughly half
-  // the vocabulary, while any given "h?" pair covers a small fraction of it.
-  //
-  // A match need not contain a pair adjacent *in the query* (for "bhl" the tag
-  // "blue_hair_large" contains neither "bh" nor "hl"), so the seeds are scanned
-  // with the exact in-order test rather than filtered by the pair.
-  const seeds = index.byOpeningChar.get(query[0]!);
-
-  if (seeds) {
-    const rest = query.slice(1);
-
-    for (const tag of seeds) {
-      if (seen.has(tag)) continue;
-      if (tag.searchKeys.some((key) => isSubsequence(rest, key))) add(tag);
-    }
-  }
 
   return candidates;
 }
@@ -255,24 +266,35 @@ export function getOrBuildIndex(tags: readonly TagRecord[]): TagIndex {
  * Ranks tags for a query. Returns at most `limit` matches, best first.
  *
  * Each tag is scored on its best-matching key so an alias hit still surfaces the
- * canonical tag.
+ * canonical tag. A query starting with `*` matches anywhere instead of only at a
+ * word boundary.
  */
 export function matchTags(tags: readonly TagRecord[], query: string, limit = 50): TagMatch[] {
-  const normalized = normalizeTagQuery(query);
+  const { query: normalized, substring } = parseTagQuery(query);
   if (!normalized) return [];
 
   const matches: TagMatch[] = [];
 
-  for (const tag of collectCandidates(tags, normalized)) {
+  // A `*` query matches anywhere, but not arbitrarily: its first pair must appear
+  // in the key, so the bigram map still bounds it. Scanning the whole vocabulary
+  // instead cost 33-134ms per keystroke at 125k tags, because the entire match set
+  // was built and sorted before the limit was applied.
+  const candidates = collectCandidates(tags, normalized);
+
+  for (const tag of candidates) {
     let best = 0;
     let bestAlias: string | undefined;
 
     for (let index = 0; index < tag.searchKeys.length; index += 1) {
-      const score = scoreTagMatch(tag.searchKeys[index]!, normalized, tag.postCount);
+      const key = tag.searchKeys[index]!;
+      // `*` means "this text, wherever it appears", so a mid-word hit is scored as
+      // a prefix hit instead of being demoted below word-boundary hits.
+      const score = scoreTagMatch(key, normalized, tag.postCount, { anywhere: substring });
+
       if (score > best) {
         best = score;
         // searchKeys[0] is the canonical name; anything later is an alias.
-        bestAlias = index === 0 ? undefined : tag.searchKeys[index];
+        bestAlias = index === 0 ? undefined : key;
       }
     }
 
@@ -281,7 +303,30 @@ export function matchTags(tags: readonly TagRecord[], query: string, limit = 50)
     }
   }
 
-  matches.sort((a, b) => b.score - a.score || a.tag.name.localeCompare(b.tag.name));
+  // Sorting the full match set is what made broad queries expensive: `*a` produced
+  // 95,675 matches to show 50. Only the best `limit` entries are ever returned, so
+  // a bounded top-N selection replaces the full sort above a threshold.
+  const compare = (a: TagMatch, b: TagMatch) => b.score - a.score || a.tag.name.localeCompare(b.tag.name);
+
+  if (matches.length > SELECTION_THRESHOLD) {
+    // Keep a running best-N: sort, truncate, and stop carrying the tail.
+    const top = matches.slice(0, limit);
+    top.sort(compare);
+
+    for (let index = limit; index < matches.length; index += 1) {
+      const candidate = matches[index]!;
+      // One comparison against the current worst is enough to reject most entries.
+      if (compare(candidate, top[top.length - 1]!) >= 0) continue;
+      top.push(candidate);
+      top.sort(compare);
+      top.pop();
+    }
+
+    return top;
+  }
+
+  matches.sort(compare);
+
   return matches.slice(0, limit);
 }
 
@@ -337,9 +382,12 @@ export function getTagFragmentAtCaret(
   const weightLength = weightMatch ? weightMatch[0].length : 0;
   const tagPart = rawFragment.slice(fragmentIndent + weightLength);
 
+  // Keep a leading `*` in the query: it means "match anywhere" and is consumed by
+  // `matchTags`. The range below already starts at the `*`, so completing replaces
+  // it rather than leaving it in the prompt.
   const query = normalizeTagQuery(tagPart);
   // A segment that is only a weight value ("-1::") has no tag to complete.
-  if (!query) return null;
+  if (!query.replace(/^\*/, "")) return null;
 
   // Once the user types a separator without typing on, the tag is finished:
   // completing it now would fight the next tag they are starting. Text after the

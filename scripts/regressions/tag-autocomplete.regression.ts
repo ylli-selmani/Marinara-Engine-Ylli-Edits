@@ -219,10 +219,114 @@ assert.equal(aliasHit.matchedAlias, "hires", "the matching alias is reported for
 assert.equal(matchTags(vocabulary, "1girl", 5)[0]?.tag.name, "1girl", "an exact prefix outranks longer siblings");
 
 assert.deepEqual(matchTags(vocabulary, "", 5), [], "an empty query returns no matches");
-assert.deepEqual(matchTags(vocabulary, "zzzznomatch", 5), [], "a query with no subsequence returns nothing");
+assert.deepEqual(matchTags(vocabulary, "zzzznomatch", 5), [], "an unmatched query returns nothing");
 
-const subsequenceHit = matchTags(vocabulary, "lngr", 5);
-assert.ok(subsequenceHit.length > 0, "fuzzy subsequence matching still finds candidates");
+// --- No subsequence ("fuzzy") tier -------------------------------------------
+//
+// A subsequence tier let query letters match a tag in order, skipping characters.
+// On a real vocabulary that is noise, not recall: `realistic` matched
+// `kingprotea_alter_(swimsuit_avenger)_(first_ascension)_(fate)`, `bhl` matched 988
+// tags (best available answer: `anus`), and `lngr` returned `\||/` rather than
+// `long_hair`. a1111-sd-webui-tagcomplete, which this feature follows, does no
+// fuzzy matching at all. These assertions pin its absence, so it cannot creep back.
+{
+  const tags = parseTagCsv(
+    [
+      "long_hair,0,6274005,",
+      "anus,0,170793,",
+      "realistic,0,32900,",
+      "realistic_teeth,0,424,",
+      "photorealistic,0,1807,",
+      "kingprotea_alter_(swimsuit_avenger)_(first_ascension)_(fate),0,57,",
+    ].join("\n"),
+  ).tags;
+
+  // `lngr` is a subsequence of `long_hair` but not a substring of it.
+  assert.deepEqual(matchTags(tags, "lngr", 5), [], "scattered letters must not match a tag");
+  // `bhl` likewise: no tag contains it literally.
+  assert.deepEqual(matchTags(tags, "bhl", 5), [], "an abbreviation with no literal hit returns nothing");
+
+  const longWordNames = matchTags(tags, "realistic", 20).map((match) => match.tag.name);
+  assert.ok(
+    !longWordNames.includes("kingprotea_alter_(swimsuit_avenger)_(first_ascension)_(fate)"),
+    `a complete word must not match on scattered letters alone: ${longWordNames}`,
+  );
+  assert.equal(longWordNames[0], "realistic", "the exact tag still ranks first for its own name");
+
+  // Prefix beats a mid-word substring, and a word-boundary substring beats a
+  // mid-word one. `hair` appears mid-word in `long_hair`.
+  assert.equal(matchTags(tags, "long", 5)[0]?.tag.name, "long_hair", "a prefix hit ranks first");
+}
+
+// --- Leading `*` means "match anywhere" --------------------------------------
+//
+// The a1111 convention, and the supported way to search inside a tag now that
+// there is no fuzzy tier. Without `*`, matching stays anchored at a word boundary.
+{
+  const tags = parseTagCsv(
+    [
+      "long_hair,0,6274005,",
+      "short_hair,0,900000,",
+      "hair_ornament,0,500000,",
+      "chair,0,30000,",
+      "unrelated,0,10,",
+    ].join("\n"),
+  ).tags;
+
+  // A bare query matches mid-word, but ranks word-boundary hits above mid-word
+  // ones. In `long_hair` the `air` follows `_`, which counts as a boundary, so it
+  // leads; in `chair` it is mid-word and trails. `*` flattens that distinction.
+  const bare = matchTags(tags, "air", 10);
+  const bareNames = bare.map((match) => match.tag.name);
+  assert.ok(bareNames.includes("chair"), `a bare query still reaches a mid-word hit: ${bareNames}`);
+  assert.ok(
+    bareNames.indexOf("long_hair") < bareNames.indexOf("chair"),
+    `a word-boundary hit must outrank a mid-word one without "*": ${bareNames}`,
+  );
+
+  const bareLongHair = bare.find((match) => match.tag.name === "long_hair")!;
+  const starredLongHair = matchTags(tags, "*air", 10).find((match) => match.tag.name === "long_hair")!;
+  const bareChair = bare.find((match) => match.tag.name === "chair")!;
+  const starredChair = matchTags(tags, "*air", 10).find((match) => match.tag.name === "chair")!;
+
+  assert.ok(
+    starredChair.score > bareChair.score,
+    `"*" must lift a mid-word hit toward the prefix tier (${bareChair.score} -> ${starredChair.score})`,
+  );
+  // With the marker the two are compared on the same footing, so popularity (not
+  // where the text sits) decides. Without it, position dominated.
+  assert.ok(
+    starredChair.score >= starredLongHair.score - 10,
+    `"*" must put a mid-word hit on the same footing as a boundary one (${starredChair.score} vs ${starredLongHair.score})`,
+  );
+
+  const starred = matchTags(tags, "*air", 10).map((match) => match.tag.name);
+  assert.ok(starred.includes("long_hair"), `"*air" must find a mid-word hit: ${starred}`);
+  assert.ok(starred.includes("chair"), `"*air" must find every mid-word hit: ${starred}`);
+
+  // The marker must not leak into the query: `*hair` is the query `hair`, not `*hair`.
+  const starredHair = matchTags(tags, "*hair", 10);
+  assert.ok(starredHair.length > 0, `"*hair" must match: ${starredHair.length}`);
+  assert.ok(
+    starredHair.every((match) => match.tag.searchKeys.some((key) => key.includes("hair"))),
+    'every result for "*hair" must actually contain the text',
+  );
+
+  // A `*` with nothing after it is not a query.
+  assert.deepEqual(matchTags(tags, "*", 5), [], "a lone marker returns nothing");
+  // `*` puts every hit on the same footing, so where the text sits stops mattering
+  // and popularity decides: `long_hair` (6.27M posts) leads even though `hair` is a
+  // trailing suffix there, while `hair_ornament` (500k) drops to last despite being
+  // the only true prefix hit. That inversion is the marker doing its job.
+  const starredHairTop = matchTags(tags, "*hair", 5);
+  assert.equal(starredHairTop[0]?.tag.name, "long_hair", 'with "*", popularity decides instead of position');
+  assert.equal(matchTags(tags, "hair", 5)[0]?.tag.name, "hair_ornament", 'without "*", a prefix hit leads');
+  assert.ok(
+    starredHairTop.every((match) => match.score >= 1000),
+    'every "*" hit is scored on the prefix tier',
+  );
+}
+
 // --- Space / underscore equivalence ------------------------------------------
 // The dataset stores `long_hair`, but prompts and aliases use spaces. Both
 // spellings must reach the same tag.
@@ -277,13 +381,14 @@ const withFiller = (prefix: string, count: number, extra: string[]): ReturnType<
   assert.equal(names.filter((name) => name === "alpha").length, 1, "the short-alias tag appears exactly once");
 }
 
-// A subsequence match can live outside the query's bucket. Restricting the
-// candidate set to a populated bucket used to make abbreviations of popular tags
-// return nothing.
+// A `*` query can match inside a tag whose 2-char prefix differs from the query's,
+// so the prefix bucket cannot narrow it. This is the one path that scans the whole
+// vocabulary, and it must still return the hit rather than inheriting the bucket's
+// narrowing (which would silently drop every mid-word match).
 {
   const tags = withFiller("bh", 30, ["blue_hair_large,0,5000,"]);
-  const names = matchTags(tags, "bhl", 50).map((match) => match.tag.name);
-  assert.ok(names.includes("blue_hair_large"), `a fuzzy match outside a populated bucket must be found: ${names}`);
+  const names = matchTags(tags, "*hair", 50).map((match) => match.tag.name);
+  assert.ok(names.includes("blue_hair_large"), `a "*" match outside the query's bucket must be found: ${names}`);
 }
 
 // --- Real-world CSV scale (opt-in) ------------------------------------------

@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
 import type { TagMatch } from "../../lib/tag-autocomplete";
-import { displayTagName } from "../../lib/tag-autocomplete";
+import { displayTagName, normalizeTagKey } from "../../lib/tag-autocomplete";
 import type { UseTagAutocompleteResult } from "../../hooks/use-tag-autocomplete";
 import { cn } from "../../lib/utils";
 
@@ -32,6 +32,8 @@ interface TagSuggestionPopupProps {
   textareaRef?: Ref<HTMLTextAreaElement>;
   /** Caret offset the popup should anchor to. */
   caret: number;
+  /** The tag text currently written in the field, normalized. */
+  query: string;
   onSelect: (match: TagMatch) => void;
   onHover: (index: number) => void;
   /** Called when the user presses outside the list and the field. */
@@ -43,92 +45,36 @@ const POPUP_WIDTH = 320;
 /** Vertical space assumed before the popup has been measured. */
 const POPUP_FALLBACK_HEIGHT = 240;
 
-/**
- * Measures the caret's on-screen position inside a textarea.
- *
- * A textarea cannot report caret coordinates directly, so this mirrors the
- * element's computed text styles onto a hidden div, copies the text up to the
- * caret into it, and reads the marker span's offset. This is the standard
- * technique and is accurate as long as the mirrored box matches exactly.
- */
-function measureCaretOffset(textarea: HTMLTextAreaElement, caret: number): { top: number; left: number } {
-  const computed = window.getComputedStyle(textarea);
-  const mirror = document.createElement("div");
-
-  const properties = [
-    "boxSizing",
-    "width",
-    "height",
-    "overflowX",
-    "overflowY",
-    "borderTopWidth",
-    "borderRightWidth",
-    "borderBottomWidth",
-    "borderLeftWidth",
-    "paddingTop",
-    "paddingRight",
-    "paddingBottom",
-    "paddingLeft",
-    "fontStyle",
-    "fontVariant",
-    "fontWeight",
-    "fontStretch",
-    "fontSize",
-    "fontFamily",
-    "lineHeight",
-    "letterSpacing",
-    "textTransform",
-    "textIndent",
-    "whiteSpace",
-    "wordSpacing",
-    "wordBreak",
-  ] as const;
-
-  for (const property of properties) {
-    mirror.style[property] = computed[property];
-  }
-
-  mirror.style.position = "absolute";
-  mirror.style.visibility = "hidden";
-  mirror.style.top = "0";
-  mirror.style.left = "0";
-  mirror.style.whiteSpace = "pre-wrap";
-  mirror.style.wordWrap = "break-word";
-  mirror.style.overflow = "hidden";
-
-  mirror.textContent = textarea.value.slice(0, caret);
-
-  const marker = document.createElement("span");
-  marker.textContent = "\u200b";
-  mirror.appendChild(marker);
-
-  document.body.appendChild(mirror);
-
-  // The mirror is border-box sized like the textarea, so subtract its own
-  // border to land on the content origin.
-  const borderLeft = parseFloat(computed.borderLeftWidth) || 0;
-  const borderTop = parseFloat(computed.borderTopWidth) || 0;
-
-  const left = marker.offsetLeft - textarea.scrollLeft + borderLeft;
-  const top = marker.offsetTop - textarea.scrollTop + borderTop;
-
-  document.body.removeChild(mirror);
-
-  return { top, left };
-}
+/** Smallest popup height worth showing; below this the list is unusable. */
+const POPUP_MIN_HEIGHT = 96;
+/** Tallest the popup grows; beyond this the list scrolls. */
+const POPUP_MAX_HEIGHT = 240;
 
 export function TagSuggestionPopup({
   matches,
   activeIndex,
   textareaRef,
   caret,
+  query,
   onSelect,
   onHover,
   onDismiss,
 }: TagSuggestionPopupProps) {
   const popupRef = useRef<HTMLDivElement>(null);
   const { t } = useTranslation();
-  const [position, setPosition] = useState<{ top: number; left: number; maxWidth: number } | null>(null);
+  const [position, setPosition] = useState<{
+    top: number;
+    left: number;
+    maxWidth: number;
+    maxHeight: number;
+  } | null>(null);
+
+  // The `*` marker is part of the query but not of any tag name, so it is stripped
+  // before comparing a suggestion against what the field contains. Whitespace is
+  // trimmed too: `normalizeTagQuery` collapses underscores to spaces, so the spaced
+  // form `* hair` arrives as `* hair` and a bare strip would leave a leading space
+  // that no tag name can equal.
+  const writtenTag = query.replace(/^\*\s*/, "").trim();
 
   useLayoutEffect(() => {
     const textarea = textareaRef && typeof textareaRef === "object" ? textareaRef.current : null;
@@ -172,35 +118,53 @@ export function TagSuggestionPopup({
 
     const update = () => {
       const rect = textarea.getBoundingClientRect();
-      const offset = measureCaretOffset(textarea, caret);
-      const lineHeight = parseFloat(window.getComputedStyle(textarea).lineHeight) || 20;
       // The popup is measured once it exists. `offsetWidth`/`offsetHeight` reflect
       // border-box, so the clamp uses the same geometry the browser lays out.
       const popupHeight = popupRef.current?.offsetHeight || POPUP_FALLBACK_HEIGHT;
       const popupWidth = popupRef.current?.offsetWidth || POPUP_WIDTH;
       const bounds = clippingRectOf(textarea);
 
-      const caretTop = rect.top + offset.top;
-      const spaceBelow = bounds.bottom - (caretTop + lineHeight);
-      const spaceAbove = caretTop - bounds.top;
-      const openUpward = spaceBelow < popupHeight && spaceAbove > spaceBelow;
+      // Anchor below the whole field rather than below the caret's line. Caret
+      // anchoring covers the text being edited whenever the field is more than a
+      // line or two tall, because the popup starts on the caret's row and grows
+      // down over the rest of the text.
+      const gap = 4;
+      const anchorTop = rect.bottom;
+      const spaceBelow = bounds.bottom - anchorTop;
+      const spaceAbove = rect.top - bounds.top;
 
-      const rawTop = openUpward ? caretTop - popupHeight - 4 : caretTop + lineHeight + 4;
+      // Flipping above is only safe when the popup genuinely fits there. Testing
+      // `spaceAbove > spaceBelow` alone is not enough: a tall field (MacroTextarea's
+      // expanded editor is ~780px) leaves almost no room above it, so the flip fired
+      // and was then clamped straight back down over the field — reintroducing the
+      // overlap this anchoring exists to prevent.
+      const openUpward = spaceBelow < popupHeight && spaceAbove >= popupHeight + gap;
+
+      // Whatever room the chosen side actually has. The popup is capped to it rather
+      // than clamped, so a short container scrolls the list instead of pushing it
+      // back across the field.
+      const room = Math.max((openUpward ? spaceAbove : spaceBelow) - gap, POPUP_MIN_HEIGHT);
+      const availableHeight = Math.min(popupHeight, room);
+
+      const rawTop = openUpward ? rect.top - availableHeight - gap : anchorTop + gap;
       // Clamp into the visible band so a short container still shows the list.
-      const maxTop = Math.max(bounds.top + 4, bounds.bottom - popupHeight - 4);
-      const top = Math.min(Math.max(rawTop, bounds.top + 4), maxTop);
+      const maxTop = Math.max(bounds.top + gap, bounds.bottom - availableHeight - gap);
+      const top = Math.min(Math.max(rawTop, bounds.top + gap), maxTop);
 
-      const rawLeft = rect.left + offset.left;
+      // Align to the field's own left edge so the list reads as belonging to it.
+      // The caret's horizontal position is deliberately not used: the popup hangs
+      // under the whole field now, so following the caret would make it drift as
+      // the user types without adding any information.
+      const rawLeft = rect.left;
       // A narrow container (a settings card can be ~280px) cannot fit the popup at
       // its natural width, so clamp against the space actually available instead of
-      // letting the list run past the edge. Prefer the caret's line start when the
-      // container is wide enough to matter, otherwise pin to its left edge.
+      // letting the list run past the edge.
       const available = bounds.right - bounds.left - 8;
       const effectiveWidth = Math.min(popupWidth, Math.max(available, 0));
       const maxLeft = Math.max(bounds.left + 4, bounds.right - effectiveWidth - 4);
       const left = Math.min(Math.max(rawLeft, bounds.left + 4), maxLeft);
 
-      setPosition({ top, left, maxWidth: effectiveWidth });
+      setPosition({ top, left, maxWidth: effectiveWidth, maxHeight: availableHeight });
     };
 
     update();
@@ -260,41 +224,63 @@ export function TagSuggestionPopup({
       role="listbox"
       aria-label={t("ui.ui.tagsuggestionpopup.tagSuggestions")}
       className="glass-strong fixed z-[9999] max-h-60 w-80 overflow-y-auto rounded-xl py-1 text-xs text-[var(--popover-foreground)]"
-      style={{ top: position.top, left: position.left, maxWidth: position.maxWidth }}
+      style={{
+        top: position.top,
+        left: position.left,
+        maxWidth: position.maxWidth,
+        // Capped to the room on the chosen side, so a short container scrolls the
+        // list rather than clamping it back across the field it is anchored to.
+        maxHeight: Math.min(position.maxHeight, POPUP_MAX_HEIGHT),
+      }}
     >
-      {matches.map((match, index) => (
-        <button
-          key={match.tag.name}
-          type="button"
-          role="option"
-          aria-selected={index === activeIndex}
-          data-index={index}
-          // mousedown fires before the textarea's blur, so selection is not lost.
-          onMouseDown={(event) => {
-            event.preventDefault();
-            onSelect(match);
-          }}
-          onMouseEnter={() => onHover(index)}
-          className={cn(
-            "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors",
-            index === activeIndex ? "bg-[var(--accent)]" : "hover:bg-[var(--accent)]/60",
-          )}
-        >
-          <span
-            className={cn("truncate font-medium", CATEGORY_COLORS[match.tag.category] ?? "text-[var(--foreground)]")}
+      {matches.map((match, index) => {
+        // The row that is exactly what the field already contains. Ranking put it
+        // first by luck; this marks it as *known vocabulary*, so the user can see
+        // the tag they wrote is real instead of merely being guessed at.
+        const isWritten = Boolean(writtenTag) && normalizeTagKey(match.tag.name) === writtenTag;
+
+        return (
+          <button
+            key={match.tag.name}
+            type="button"
+            role="option"
+            aria-selected={index === activeIndex}
+            data-index={index}
+            // mousedown fires before the textarea's blur, so selection is not lost.
+            onMouseDown={(event) => {
+              event.preventDefault();
+              onSelect(match);
+            }}
+            onMouseEnter={() => onHover(index)}
+            className={cn(
+              "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors",
+              index === activeIndex ? "bg-[var(--accent)]" : "hover:bg-[var(--accent)]/60",
+            )}
           >
-            {displayTagName(match.tag.name)}
-          </span>
-          {match.matchedAlias ? (
-            <span className="shrink-0 truncate text-[0.625rem] text-[var(--muted-foreground)]">
-              {displayTagName(match.matchedAlias)} →
+            <span
+              className={cn("truncate font-medium", CATEGORY_COLORS[match.tag.category] ?? "text-[var(--foreground)]")}
+            >
+              {displayTagName(match.tag.name)}
             </span>
-          ) : null}
-          <span className="ml-auto shrink-0 text-[0.625rem] tabular-nums text-[var(--muted-foreground)]">
-            {match.tag.postCount > 0 ? match.tag.postCount.toLocaleString() : t("ui.ui.tagsuggestionpopup.customTag")}
-          </span>
-        </button>
-      ))}
+            {isWritten ? (
+              <span
+                className="shrink-0 rounded-sm px-1 text-[0.5625rem] font-semibold tracking-wide text-[var(--muted-foreground)] ring-1 ring-[var(--border)]"
+                title={t("ui.ui.tagsuggestionpopup.alreadyWritten")}
+              >
+                {t("ui.ui.tagsuggestionpopup.writtenBadge")}
+              </span>
+            ) : null}
+            {match.matchedAlias ? (
+              <span className="shrink-0 truncate text-[0.625rem] text-[var(--muted-foreground)]">
+                {displayTagName(match.matchedAlias)} →
+              </span>
+            ) : null}
+            <span className="ml-auto shrink-0 text-[0.625rem] tabular-nums text-[var(--muted-foreground)]">
+              {match.tag.postCount > 0 ? match.tag.postCount.toLocaleString() : t("ui.ui.tagsuggestionpopup.customTag")}
+            </span>
+          </button>
+        );
+      })}
     </div>,
     document.body,
   );
@@ -322,6 +308,7 @@ export function TagAutocompleteOverlay({
       activeIndex={autocomplete.activeIndex}
       textareaRef={textareaRef}
       caret={autocomplete.anchor}
+      query={autocomplete.query}
       onSelect={autocomplete.handleSelect}
       onHover={autocomplete.setActiveIndex}
       onDismiss={autocomplete.dismiss}
