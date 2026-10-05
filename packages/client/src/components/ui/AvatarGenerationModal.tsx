@@ -6,6 +6,7 @@ import { useUIStore } from "../../stores/ui.store";
 import { api } from "../../lib/api-client";
 import { cn } from "../../lib/utils";
 import { Modal } from "./Modal";
+import { TagAutocompleteTextarea } from "./TagAutocompleteTextarea";
 import { ImagePromptReviewModal, type ImagePromptOverride, type ImagePromptReviewItem } from "./ImagePromptReviewModal";
 import { useTranslation as useUiTranslation } from "react-i18next";
 
@@ -261,11 +262,12 @@ export function AvatarGenerationModal({
                       : "ui.ui.avatargenerationmodal.avatarPrompt",
                   )}
                 </span>
-                <textarea
+                <TagAutocompleteTextarea
                   value={appearance}
-                  onChange={(event) => setAppearance(event.target.value)}
+                  onChange={setAppearance}
                   rows={7}
-                  className="w-full resize-y rounded-lg bg-[var(--secondary)] px-3 py-2 text-xs leading-relaxed text-[var(--foreground)] outline-none ring-1 ring-transparent transition-all placeholder:text-[var(--muted-foreground)] focus:ring-[var(--primary)]/40"
+                  spellCheck
+                  className="resize-y rounded-lg bg-[var(--secondary)] px-3 py-2 ring-1 ring-transparent transition-all focus:ring-[var(--primary)]/40"
                   placeholder={localizeUi(
                     isCharacterSheet
                       ? "ui.ui.avatargenerationmodal.describeCanonicalCharacterSheet"

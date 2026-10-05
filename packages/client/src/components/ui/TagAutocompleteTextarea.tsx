@@ -57,7 +57,9 @@ export function TagAutocompleteTextarea({
         spellCheck={spellCheck}
         maxLength={maxLength}
         className={cn(
-          "w-full resize-y rounded-lg bg-[var(--secondary)] px-2.5 py-2 text-xs leading-relaxed text-[var(--foreground)] outline-none ring-1 ring-[var(--border)] transition placeholder:text-[var(--muted-foreground)] focus:ring-[var(--primary)]/50",
+          // Base matches the settings-panel field look; callers override freely
+          // (SpriteGenerationModal uses a different radius and resize behavior).
+          "w-full bg-[var(--secondary)] px-2.5 py-2 text-xs leading-relaxed text-[var(--foreground)] outline-none ring-1 ring-[var(--border)] transition placeholder:text-[var(--muted-foreground)] focus:ring-[var(--primary)]/50",
           className,
         )}
       />

@@ -1,6 +1,7 @@
 import { Loader2, Send, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Modal } from "./Modal";
+import { TagAutocompleteTextarea } from "./TagAutocompleteTextarea";
 import { cn } from "../../lib/utils";
 import { useTranslation as useUiTranslation } from "react-i18next";
 
@@ -141,27 +142,25 @@ export function ImagePromptReviewModal({
                     {localizeUi("ui.panels.promptoverrideseditorbody.chars")}
                   </span>
                 </div>
-                <textarea
+                <TagAutocompleteTextarea
                   value={value}
-                  onChange={(event) => setDrafts((current) => ({ ...current, [item.id]: event.target.value }))}
+                  onChange={(next) => setDrafts((current) => ({ ...current, [item.id]: next }))}
                   maxLength={item.maxLength}
                   rows={8}
                   spellCheck={false}
-                  className="min-h-40 resize-y rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 font-mono text-xs leading-relaxed text-[var(--foreground)] outline-none placeholder:text-[var(--muted-foreground)]/70 focus:border-[var(--primary)]"
+                  className="min-h-40 resize-y rounded-lg bg-[var(--background)] px-3 py-2 font-mono ring-[var(--border)] placeholder:text-[var(--muted-foreground)]/70 focus:ring-[var(--primary)]"
                 />
                 {(item.negativePrompt !== undefined || negativeValue) && (
                   <div className="flex flex-col gap-1">
                     <span className="text-[0.625rem] font-medium text-[var(--muted-foreground)]">
                       {localizeUi("ui.agents.agenteditor.negativePrompt")}
                     </span>
-                    <textarea
+                    <TagAutocompleteTextarea
                       value={negativeValue}
-                      onChange={(event) =>
-                        setNegativeDrafts((current) => ({ ...current, [item.id]: event.target.value }))
-                      }
+                      onChange={(next) => setNegativeDrafts((current) => ({ ...current, [item.id]: next }))}
                       rows={4}
                       spellCheck={false}
-                      className="min-h-24 resize-y rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 font-mono text-xs leading-relaxed text-[var(--foreground)] outline-none placeholder:text-[var(--muted-foreground)]/70 focus:border-[var(--primary)]"
+                      className="min-h-24 resize-y rounded-lg bg-[var(--background)] px-3 py-2 font-mono ring-[var(--border)] placeholder:text-[var(--muted-foreground)]/70 focus:ring-[var(--primary)]"
                     />
                   </div>
                 )}

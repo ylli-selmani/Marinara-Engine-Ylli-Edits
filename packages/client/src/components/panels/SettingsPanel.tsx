@@ -2402,7 +2402,7 @@ function ImageStyleProfilesEditor({
         <TagAutocompleteTextarea
           value={selected.styleText}
           onChange={(styleText) => updateSelected({ styleText })}
-          className="min-h-20 rounded-md border px-2.5 py-2"
+          className="min-h-20 resize-y rounded-md border bg-[var(--secondary)] px-2.5 py-2"
         />
       </label>
 
@@ -2414,7 +2414,7 @@ function ImageStyleProfilesEditor({
           <TagAutocompleteTextarea
             value={selected.positiveTags}
             onChange={(positiveTags) => updateSelected({ positiveTags })}
-            className="min-h-24 rounded-md border px-2.5 py-2"
+            className="min-h-24 resize-y rounded-md border bg-[var(--secondary)] px-2.5 py-2"
           />
         </label>
         <label className="block">
@@ -2424,7 +2424,7 @@ function ImageStyleProfilesEditor({
           <TagAutocompleteTextarea
             value={selected.negativeTags}
             onChange={(negativeTags) => updateSelected({ negativeTags })}
-            className="min-h-24 rounded-md border px-2.5 py-2"
+            className="min-h-24 resize-y rounded-md border bg-[var(--secondary)] px-2.5 py-2"
           />
         </label>
       </div>
@@ -2442,7 +2442,7 @@ function ImageStyleProfilesEditor({
               <TagAutocompleteTextarea
                 value={selected.subjectTags[kind] ?? ""}
                 onChange={(tags) => updateSubjectTags(kind, tags)}
-                className="min-h-14 border bg-[var(--background)] px-2.5 py-2"
+                className="min-h-14 resize-y rounded-md border bg-[var(--background)] px-2.5 py-2"
               />
             </label>
           ))}

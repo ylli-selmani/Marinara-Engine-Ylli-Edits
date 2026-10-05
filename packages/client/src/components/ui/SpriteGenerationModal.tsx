@@ -6,6 +6,7 @@
 import { useState, useRef, useMemo, useCallback, useEffect } from "react";
 import { X, Loader2, Check, ImagePlus, Sparkles, ArrowLeft, Crop, RotateCcw, Film } from "lucide-react";
 import { Modal } from "./Modal";
+import { TagAutocompleteTextarea } from "./TagAutocompleteTextarea";
 import { cn } from "../../lib/utils";
 import { useConnections } from "../../hooks/use-connections";
 import { useSpriteCapabilities } from "../../hooks/use-characters";
@@ -2039,12 +2040,12 @@ export function SpriteGenerationModal({
               <label className="mb-1.5 block text-xs font-medium text-[var(--foreground)]">
                 {localizeUi("ui.ui.spritegenerationmodal.appearanceDescription")}
               </label>
-              <textarea
+              <TagAutocompleteTextarea
                 value={appearance}
-                onChange={(e) => setAppearance(e.target.value)}
+                onChange={setAppearance}
                 placeholder={localizeUi("ui.ui.spritegenerationmodal.blueEyesBlondeHairAnimeStyleWearingAHoodie")}
                 rows={3}
-                className="w-full resize-none rounded-lg bg-[var(--secondary)] px-3 py-2 text-xs text-[var(--foreground)] outline-none ring-1 ring-transparent transition-all placeholder:text-[var(--muted-foreground)] focus:ring-[var(--primary)]/40"
+                className="resize-none rounded-lg bg-[var(--secondary)] px-3 py-2 ring-1 ring-transparent transition-all focus:ring-[var(--primary)]/40"
               />
             </div>
 
