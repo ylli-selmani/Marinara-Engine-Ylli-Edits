@@ -111,8 +111,20 @@ assert.deepEqual(
 
 assert.deepEqual(getTagFragmentAtCaret("long_ha", 7), { query: "long ha", start: 0, end: 7 }, "the first tag works");
 
-assert.equal(getTagFragmentAtCaret("long_hair ", 10), null, "a trailing space closes the popup");
-assert.equal(getTagFragmentAtCaret("(masterpiece:1.2", 15), null, "weight syntax must not be completed");
+// A trailing space keeps the fragment open, because a space is part of real tag
+// keys (`blonde hair`). Suggestions stop when nothing matches, not on the space.
+assert.deepEqual(
+  getTagFragmentAtCaret("long_hair ", 10),
+  { query: "long hair", start: 0, end: 10 },
+  "a trailing space keeps the fragment open",
+);
+// Parentheses are part of a tag name in every real export, so they complete like
+// any other character. Only `n::` carries weight syntax here.
+assert.deepEqual(
+  getTagFragmentAtCaret("watercolor_(medium", 18),
+  { query: "watercolor (medium", start: 0, end: 18 },
+  "an unclosed parenthesis is still a completable tag",
+);
 assert.equal(getTagFragmentAtCaret("masterpiece, ", 13), null, "an empty field has nothing to complete");
 
 // --- Caret in the middle of a word -------------------------------------------
@@ -178,8 +190,8 @@ assert.equal(
 
 assert.equal(
   applyTagCompletion("", { start: 0, end: 0 }, "smile_(expression)").value,
-  "smile \\(expression\\), ",
-  "parentheses are escaped so they are not read as weights",
+  "smile (expression), ",
+  "parentheses are inserted verbatim so the tag matches the vocabulary",
 );
 
 // The range is derived from the same helper the hook uses, so this pins the real
@@ -207,6 +219,10 @@ const vocabulary = parseTagCsv(
     "long_hair,0,6274005," + '"/lh,longhair"',
     "long_hair_ornament,0,500,",
     "solo,0,7131665,",
+    // Multi-word and parenthesized names, as a real export stores them.
+    "blonde_hair,0,2195202,",
+    "watercolor_(medium),0,22992,",
+    "watercolor_pencil_(medium),0,838,",
   ].join("\n"),
 ).tags;
 
@@ -325,6 +341,46 @@ assert.deepEqual(matchTags(vocabulary, "zzzznomatch", 5), [], "an unmatched quer
     starredHairTop.every((match) => match.score >= 1000),
     'every "*" hit is scored on the prefix tier',
   );
+}
+
+// --- Spaces and parentheses are tag content, not syntax -----------------------
+// Real exports store `watercolor_(medium)` and `blonde_hair` — a space and a
+// parenthesis are part of the key. Treating either as a separator made the common
+// case uncompletable: 28.2% of a Danbooru export has parentheses in the name, and
+// `blonde ` closed the popup right when `blonde hair` was the answer.
+{
+  // A trailing space must NOT end the fragment.
+  const spaced = getTagFragmentAtCaret("blonde ", 7);
+  assert.ok(spaced, "a trailing space does not end the fragment");
+  assert.equal(spaced.query, "blonde", "the trailing space is trimmed from the query");
+  assert.ok(
+    matchTags(vocabulary, spaced.query, 3).some((match) => match.tag.name === "blonde_hair"),
+    '"blonde " still suggests blonde_hair',
+  );
+
+  // A comma DOES end it: the tag is finished and the next one is starting.
+  assert.equal(getTagFragmentAtCaret("masterpiece, ", 13), null, "a trailing comma ends the fragment");
+
+  // Parentheses are part of the name, so they must be completable.
+  const parenthesized = "watercolor pencil (medium)";
+  const parenFragment = getTagFragmentAtCaret(parenthesized, parenthesized.length);
+  assert.ok(parenFragment, "a parenthesized tag is completable");
+  assert.equal(parenFragment.query, parenthesized, "the parenthesized text is the query");
+
+  // Clicking into the middle of a multi-word tag resolves the WHOLE tag, so
+  // completing it replaces all of it rather than leaving a fragment behind.
+  const midCaret = parenthesized.indexOf("medium") + "medium".length;
+  const midFragment = getTagFragmentAtCaret(parenthesized, midCaret);
+  assert.ok(midFragment, "a caret inside a multi-word tag is completable");
+  assert.equal(midFragment.query, parenthesized, "a mid-tag caret resolves the whole tag");
+  assert.equal(midFragment.start, 0, "the replacement starts at the beginning of the tag");
+
+  // Completion inserts the tag verbatim. Escaping `(` here would be A1111 `(tag:1.2)`
+  // syntax, which this app does not parse — weights are `1.2::tag` — and it would
+  // write a tag that no longer exists in the vocabulary.
+  const applied = applyTagCompletion("realistic, ", { start: 11, end: 11 }, "watercolor_(medium)");
+  assert.equal(applied.value, "realistic, watercolor (medium), ", "parentheses are inserted unescaped");
+  assert.ok(!applied.value.includes("\\"), "no backslash escaping is applied to a tag");
 }
 
 // --- Space / underscore equivalence ------------------------------------------

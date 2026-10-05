@@ -342,10 +342,16 @@ const WEIGHT_PREFIX = /^([-+]?\d*\.?\d+)\s*::/;
 /**
  * Finds the tag fragment being typed at `caret`, plus the range to replace.
  *
- * Tags are comma separated, so the fragment runs from the previous comma to the
- * *end of the word under the caret* — not to the caret itself. Using the caret as
- * the end is what mangled tags: clicking into the middle and completing replaced
- * only the half before the pointer, leaving the remainder behind.
+ * Tags are comma separated, so a fragment runs from the previous comma to the end
+ * of the segment under the caret — not to the caret itself. Using the caret as the
+ * end is what mangled tags: clicking into the middle and completing replaced only
+ * the half before the pointer, leaving the remainder behind.
+ *
+ * A space does NOT end a fragment. Real tag keys contain spaces (`blonde hair`) and
+ * parentheses (`watercolor_(medium)`), so treating either as syntax made the common
+ * case uncompletable: 28.2% of a Danbooru export has parentheses in the name. The
+ * caller decides whether to show suggestions based on whether anything matched,
+ * which closes the list exactly when there is nothing left to offer.
  *
  * Weight syntax is stripped from the front (`1.1::toon` completes `toon`) and
  * makes the whole segment non-completable when it is a bare number (`-1::`).
@@ -362,16 +368,13 @@ export function getTagFragmentAtCaret(
   const lastComma = before.lastIndexOf(",");
   const rawStart = lastComma + 1;
 
-  // The word continues past the caret, so the replacement spans the whole tag.
-  // Only the run up to the next whitespace or comma belongs to it.
+  // The segment continues past the caret, so the replacement spans the whole tag.
+  // A comma is the only true terminator; spaces and parentheses belong to the tag.
   const after = value.slice(caret);
-  const trailing = after.match(/^[^,\s]*/)?.[0] ?? "";
+  const trailing = after.match(/^[^,]*/)?.[0] ?? "";
   const trailingSeparator = after.slice(trailing.length).match(/^\s*/)?.[0] ?? "";
 
   const rawFragment = before.slice(rawStart) + trailing;
-
-  // Parenthesized weight groups are not tag names, so leave them alone.
-  if (rawFragment.includes("(") || rawFragment.includes(")")) return null;
 
   // Skip the separator space so a weight prefix is still recognized at the start
   // of the fragment ("masterpiece, 1.15::toon").
@@ -389,10 +392,12 @@ export function getTagFragmentAtCaret(
   // A segment that is only a weight value ("-1::") has no tag to complete.
   if (!query.replace(/^\*/, "")) return null;
 
-  // Once the user types a separator without typing on, the tag is finished:
-  // completing it now would fight the next tag they are starting. Text after the
-  // caret means a mid-word edit, which is still completable.
-  if (!trailing && /[\s,]$/.test(before)) return null;
+  // A comma means the tag is finished: completing it would fight the next tag the
+  // user is starting. A space does NOT, because tag keys contain them (`blonde
+  // hair`). The caller closes the list when nothing matches, so typing a real
+  // separator after a complete tag stops suggestions on its own, while `blonde `
+  // keeps offering `blonde hair`.
+  if (!trailing && /,$/.test(before)) return null;
 
   const leadingWhitespace = tagPart.length - tagPart.trimStart().length;
 
@@ -407,7 +412,11 @@ export function getTagFragmentAtCaret(
  * Applies a chosen tag to the text, replacing the active fragment and appending
  * a trailing ", " so tags can be typed back to back.
  *
- * Parentheses are escaped because most backends treat them as weight syntax.
+ * Parentheses are inserted verbatim. Escaping them is A1111 `(tag:1.2)` syntax,
+ * which this app does not parse — weights here are written `1.2::tag`. Since 28.2%
+ * of a Danbooru export has parentheses in the name, escaping would corrupt the tag
+ * on insertion and break its own exact-match badge: `watercolor_(medium)` would be
+ * written as `watercolor_\(medium\)`, which is no longer the tag.
  */
 export function applyTagCompletion(
   value: string,
@@ -416,7 +425,7 @@ export function applyTagCompletion(
   options: { appendComma?: boolean } = {},
 ): { value: string; caret: number } {
   const appendComma = options.appendComma ?? true;
-  const label = displayTagName(tagName).replace(/([()\\])/g, "\\$1");
+  const label = displayTagName(tagName);
 
   const before = value.slice(0, range.start);
   // The range covers the fragment and its trailing separator, so whatever remains

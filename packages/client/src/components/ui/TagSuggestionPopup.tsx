@@ -26,6 +26,20 @@ const CATEGORY_COLORS: Record<number, string> = {
   8: "text-violet-400",
 };
 
+/**
+ * Normalizes a tag name for the "you already wrote this" comparison.
+ *
+ * Punctuation and spacing are dropped on both sides so `watercolor pencil medium`
+ * matches the stored `watercolor_(medium)` form. A tag's identity is its words —
+ * someone typing by hand reasonably drops the parenthesized qualifier, and they
+ * should still be told the tag exists.
+ */
+function comparableTagName(name: string): string {
+  return normalizeTagKey(name)
+    .replace(/[^a-z0-9]+/g, "")
+    .trim();
+}
+
 interface TagSuggestionPopupProps {
   matches: TagMatch[];
   activeIndex: number;
@@ -237,7 +251,11 @@ export function TagSuggestionPopup({
         // The row that is exactly what the field already contains. Ranking put it
         // first by luck; this marks it as *known vocabulary*, so the user can see
         // the tag they wrote is real instead of merely being guessed at.
-        const isWritten = Boolean(writtenTag) && normalizeTagKey(match.tag.name) === writtenTag;
+        //
+        // Punctuation is ignored because it is often dropped when typing by hand:
+        // someone typing `watercolor pencil medium` means `watercolor pencil
+        // (medium)`, and that is the tag they should be told exists.
+        const isWritten = Boolean(writtenTag) && comparableTagName(match.tag.name) === comparableTagName(writtenTag);
 
         return (
           <button
