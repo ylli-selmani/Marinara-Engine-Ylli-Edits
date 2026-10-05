@@ -1,130 +1,38 @@
 /**
- * Booru-style tag autocomplete: CSV parsing + fuzzy matching.
+ * Booru-style tag autocomplete: matching and caret editing for the client.
  *
- * The tag vocabulary is always user-supplied — Marinara ships no tag data.
- * The expected CSV layout matches the a1111 tagcomplete convention:
- *
- *   <name>,<type>,<postCount>,"<aliases>"
- *
- * e.g. `long_hair,0,2898315,longhair`
- *
- * Column names are not expected, and both count and aliases are optional.
- * Multiple aliases are comma separated inside the quoted fourth column.
+ * CSV parsing lives in `@marinara-engine/shared` (`utils/tag-csv.ts`) so the same
+ * rules apply wherever a vocabulary is read. This module owns what is purely
+ * interactive: ranking candidates and splicing a chosen tag into the text.
  */
+import {
+  displayTagName,
+  normalizeTagQuery,
+  type TagRecord,
+  // Re-exported so callers have one import site for vocabulary work.
+} from "@marinara-engine/shared";
 
-/** Tag category, following the Danbooru tag API numbering. Used only for result coloring. */
-export type TagCategory = number;
-
-export interface TagRecord {
-  /** Canonical tag as trained, underscores preserved. */
-  name: string;
-  category: TagCategory;
-  postCount: number;
-  aliases: string[];
-  /** Lowercased search keys: the name plus every alias, for cheap matching. */
-  searchKeys: string[];
-}
+export {
+  displayTagName,
+  normalizeTagQuery,
+  parseTagCsv,
+  parseTagCsvRecords,
+  splitTagCsvLine,
+  TAG_CSV_MAX_CHARS,
+  TAG_CSV_MAX_TAGS,
+  TAG_CSV_MAX_TAG_LENGTH,
+  type ParsedTagCsv,
+  type TagCategory,
+  type TagCsvIssue,
+  type TagCsvIssueCode,
+  type TagRecord,
+} from "@marinara-engine/shared";
 
 export interface TagMatch {
   tag: TagRecord;
   score: number;
   /** The alias that matched, when the match came from an alias rather than the name. */
   matchedAlias?: string;
-}
-
-/**
- * Splits one CSV line into fields, honoring double-quoted values that may
- * themselves contain commas. Handles the `""` escape for a literal quote.
- */
-export function splitCsvLine(line: string): string[] {
-  const fields: string[] = [];
-  let current = "";
-  let inQuotes = false;
-
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index];
-
-    if (inQuotes) {
-      if (char === '"') {
-        if (line[index + 1] === '"') {
-          current += '"';
-          index += 1;
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        current += char;
-      }
-      continue;
-    }
-
-    if (char === '"') {
-      inQuotes = true;
-    } else if (char === ",") {
-      fields.push(current);
-      current = "";
-    } else {
-      current += char;
-    }
-  }
-
-  fields.push(current);
-  return fields;
-}
-
-/** Booru tags use underscores; the models were trained on spaces. */
-export function displayTagName(name: string): string {
-  return name.replace(/_/g, " ");
-}
-
-export function normalizeTagQuery(query: string): string {
-  return query.trim().replace(/\s+/g, " ").toLowerCase();
-}
-
-/**
- * Parses a tag CSV into records. Malformed and blank lines are skipped rather
- * than failing the whole import, so a partially broken export still works.
- */
-export function parseTagCsv(text: string, options: { limit?: number } = {}): TagRecord[] {
-  const limit = options.limit ?? Number.POSITIVE_INFINITY;
-  const tags: TagRecord[] = [];
-  const seen = new Set<string>();
-
-  // Strip a UTF-8 BOM, which spreadsheet exports commonly prepend.
-  const source = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
-
-  for (const rawLine of source.split(/\r?\n/)) {
-    if (tags.length >= limit) break;
-    const line = rawLine.trim();
-    if (!line) continue;
-
-    const fields = splitCsvLine(line);
-    const name = (fields[0] ?? "").trim();
-    if (!name) continue;
-
-    const key = name.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-
-    const category = Number.parseInt((fields[1] ?? "").trim(), 10);
-    const postCount = Number.parseInt((fields[2] ?? "").trim(), 10);
-    const aliases = (fields[3] ?? "")
-      .split(",")
-      .map((alias) => alias.trim())
-      .filter(Boolean);
-
-    const searchKeys = [name, ...aliases].map((entry) => entry.toLowerCase());
-
-    tags.push({
-      name,
-      category: Number.isFinite(category) ? category : 0,
-      postCount: Number.isFinite(postCount) ? postCount : 0,
-      aliases,
-      searchKeys,
-    });
-  }
-
-  return tags;
 }
 
 /**
@@ -141,7 +49,7 @@ export function scoreTagMatch(searchKey: string, query: string, postCount: numbe
   let base = 0;
 
   if (index === 0) {
-    // Prefix match: exact-length prefixes beat longer partial ones.
+    // Prefix match: an exact prefix beats a longer partial one.
     base = 1000 - Math.min(searchKey.length - query.length, 200);
   } else if (index > 0) {
     // Word-boundary substring beats a mid-word substring.
@@ -172,30 +80,195 @@ export function isSubsequence(query: string, value: string): boolean {
   return queryIndex === query.length;
 }
 
+/** Prefix length used as the index bucket key. Two characters is the sweet spot. */
+const INDEX_PREFIX_LENGTH = 2;
+
+/** Map from a 1-2 character prefix to the tags starting with it. */
+export interface TagIndex {
+  byPrefix: Map<string, TagRecord[]>;
+  /** Tags whose name or alias contains a given pair, grouped by its first character. */
+  byOpeningChar: Map<string, TagRecord[]>;
+  /** Every tag whose name or alias is shorter than the prefix length. */
+  short: TagRecord[];
+  tags: readonly TagRecord[];
+}
+
+/**
+ * Indexes a vocabulary for fast candidate lookup.
+ *
+ * Three structures cooperate:
+ * - `byPrefix`: tags whose name or alias starts with a 2-char prefix.
+ * - `short`: tags with no key long enough to bucket, kept disjoint from buckets.
+ * - `byOpeningChar`: tags containing a 2-char pair, grouped by that pair's first
+ *   character, used to reach fuzzy matches without scanning the whole vocabulary.
+ *
+ * A tag is either short-keyed or bucketed, never both, so concatenating those
+ * two cannot yield the same tag twice.
+ */
+export function createTagIndex(tags: readonly TagRecord[]): TagIndex {
+  const byPrefix = new Map<string, TagRecord[]>();
+  const byOpeningChar = new Map<string, TagRecord[]>();
+  const short: TagRecord[] = [];
+  const seenShort = new Set<TagRecord>();
+
+  // Membership sets mirror each list. Probing a list with `includes` is O(n) per
+  // tag and turns the build quadratic — 26s over a 126k-tag vocabulary — so the
+  // dedupe uses these instead, keeping the build a single linear pass.
+  const prefixSeen = new Map<string, Set<TagRecord>>();
+
+  const addToBucket = (key: string, tag: TagRecord) => {
+    let bucket = byPrefix.get(key);
+    let members = prefixSeen.get(key);
+
+    if (!bucket || !members) {
+      bucket = [];
+      members = new Set();
+      byPrefix.set(key, bucket);
+      prefixSeen.set(key, members);
+    }
+
+    // A tag can reach the same bucket through its name and an alias that share
+    // a 2-char prefix; keep one entry so it is not scored twice.
+    if (members.has(tag)) return;
+    members.add(tag);
+    bucket.push(tag);
+  };
+
+  const addToOpeningChar = (opening: string, tag: TagRecord) => {
+    const group = byOpeningChar.get(opening);
+    if (group) {
+      group.push(tag);
+    } else {
+      byOpeningChar.set(opening, [tag]);
+    }
+  };
+
+  for (const tag of tags) {
+    // A tag is only "short" when *every* key is below the prefix length;
+    // otherwise its long keys already make it reachable through a bucket.
+    let hasLongKey = false;
+
+    // Openings already recorded for this tag, so it is listed once per opening
+    // character however many distinct pairs it contributes. Scoped per tag to
+    // keep the bookkeeping proportional to one tag rather than the vocabulary.
+    const openings = new Set<string>();
+
+    for (const key of tag.searchKeys) {
+      if (key.length >= INDEX_PREFIX_LENGTH) {
+        hasLongKey = true;
+        addToBucket(key.slice(0, INDEX_PREFIX_LENGTH), tag);
+      }
+
+      for (let position = 0; position < key.length - 1; position += 1) {
+        const opening = key[position]!;
+        if (openings.has(opening)) continue;
+        openings.add(opening);
+        addToOpeningChar(opening, tag);
+      }
+    }
+
+    if (!hasLongKey && !seenShort.has(tag)) {
+      seenShort.add(tag);
+      short.push(tag);
+    }
+  }
+
+  return { byPrefix, byOpeningChar, short, tags };
+}
+
+/**
+ * Narrows a query to the tags worth scoring.
+ *
+ * The bucket alone is not a sound candidate set: it holds prefix/substring hits,
+ * but a fuzzy subsequence ("lngr" -> "long_hair") can live in any bucket, and
+ * popular query prefixes fill their bucket while rare ones barely fill it. Gating
+ * on bucket size therefore both drops results and, when the bucket looks sparse,
+ * falls back to scanning the whole vocabulary on every keystroke.
+ *
+ * Instead the candidate set is always the union of three cheap, sound sources:
+ * the query's bucket (prefix and substring hits), the short-key list, and the
+ * tags containing the query's first character, which is where every subsequence
+ * match must start.
+ */
+function collectCandidates(tags: readonly TagRecord[], query: string): readonly TagRecord[] {
+  if (query.length < INDEX_PREFIX_LENGTH) return tags;
+
+  const index = getOrBuildIndex(tags);
+  const bucket = index.byPrefix.get(query.slice(0, INDEX_PREFIX_LENGTH));
+
+  const candidates: TagRecord[] = [];
+  const seen = new Set<TagRecord>();
+
+  const add = (tag: TagRecord) => {
+    if (seen.has(tag)) return;
+    seen.add(tag);
+    candidates.push(tag);
+  };
+
+  // Bucket entries are guaranteed prefix/substring hits.
+  if (bucket) for (const tag of bucket) add(tag);
+  for (const tag of index.short) add(tag);
+
+  // For a two-character query, "is a subsequence of" and "contains" coincide, so
+  // the bucket already holds every match (`short` covers tags too brief to
+  // bucket). Skipping the fuzzy scan here avoids walking the first character's
+  // list — most of the vocabulary — on every two-key stroke.
+  if (query.length < 3) return candidates;
+
+  // Fuzzy matches are reached through the pairs that begin with the query's
+  // first character, which is a sound bound: every subsequence match must start
+  // with that character, so it appears in some pair starting with it. Pair lists
+  // stay discriminating where character lists do not — "h" is in roughly half
+  // the vocabulary, while any given "h?" pair covers a small fraction of it.
+  //
+  // A match need not contain a pair adjacent *in the query* (for "bhl" the tag
+  // "blue_hair_large" contains neither "bh" nor "hl"), so the seeds are scanned
+  // with the exact in-order test rather than filtered by the pair.
+  const seeds = index.byOpeningChar.get(query[0]!);
+
+  if (seeds) {
+    const rest = query.slice(1);
+
+    for (const tag of seeds) {
+      if (seen.has(tag)) continue;
+      if (tag.searchKeys.some((key) => isSubsequence(rest, key))) add(tag);
+    }
+  }
+
+  return candidates;
+}
+
+/**
+ * Caches the index against the vocabulary array identity, so repeated keystrokes
+ * reuse one build. A new import produces a new array and therefore a new index.
+ */
+let cachedIndex: { tags: readonly TagRecord[]; index: TagIndex } | null = null;
+
+export function getOrBuildIndex(tags: readonly TagRecord[]): TagIndex {
+  if (cachedIndex && cachedIndex.tags === tags) return cachedIndex.index;
+  const index = createTagIndex(tags);
+  cachedIndex = { tags, index };
+  return index;
+}
+
 /**
  * Ranks tags for a query. Returns at most `limit` matches, best first.
  *
  * Each tag is scored on its best-matching key so an alias hit still surfaces the
  * canonical tag.
- *
- * A full scan over a 125k-tag export costs roughly 17ms, which drops frames while
- * typing. Building a small prefix index first (see `createTagIndex`) narrows the
- * candidate set to the tags that can actually win, so the common case only scores
- * a handful of entries.
  */
 export function matchTags(tags: readonly TagRecord[], query: string, limit = 50): TagMatch[] {
   const normalized = normalizeTagQuery(query);
   if (!normalized) return [];
 
-  const candidates = collectCandidates(tags, normalized);
   const matches: TagMatch[] = [];
 
-  for (const tag of candidates) {
+  for (const tag of collectCandidates(tags, normalized)) {
     let best = 0;
     let bestAlias: string | undefined;
 
     for (let index = 0; index < tag.searchKeys.length; index += 1) {
-      const score = scoreTagMatch(tag.searchKeys[index], normalized, tag.postCount);
+      const score = scoreTagMatch(tag.searchKeys[index]!, normalized, tag.postCount);
       if (score > best) {
         best = score;
         // searchKeys[0] is the canonical name; anything later is an alias.
@@ -212,104 +285,12 @@ export function matchTags(tags: readonly TagRecord[], query: string, limit = 50)
   return matches.slice(0, limit);
 }
 
-/** Prefix length used as the index bucket key. Two characters is the sweet spot. */
-const INDEX_PREFIX_LENGTH = 2;
-
-/** Approximate map from a 1-2 character prefix to the tags starting with it. */
-export interface TagIndex {
-  /** Tags bucketed by their first `INDEX_PREFIX_LENGTH` characters. */
-  byPrefix: Map<string, TagRecord[]>;
-  /** Every tag whose name or alias is shorter than the prefix length. */
-  short: TagRecord[];
-  tags: readonly TagRecord[];
-}
-
-/**
- * Builds a prefix index over a vocabulary.
- *
- * Buckets hold tags whose name *or* any alias starts with that prefix, so alias
- * queries stay fast. The index costs one pass and is meant to be built once per
- * imported vocabulary, not per keystroke.
- */
-export function createTagIndex(tags: readonly TagRecord[]): TagIndex {
-  const byPrefix = new Map<string, TagRecord[]>();
-  const short: TagRecord[] = [];
-  const bucketed = new Set<TagRecord>();
-
-  const addToBucket = (key: string, tag: TagRecord) => {
-    const bucket = byPrefix.get(key);
-    if (bucket) {
-      bucket.push(tag);
-    } else {
-      byPrefix.set(key, [tag]);
-    }
-  };
-
-  for (const tag of tags) {
-    let placed = false;
-
-    for (const key of tag.searchKeys) {
-      if (key.length < INDEX_PREFIX_LENGTH) {
-        if (!short.includes(tag)) short.push(tag);
-        placed = true;
-        continue;
-      }
-
-      addToBucket(key.slice(0, INDEX_PREFIX_LENGTH), tag);
-      placed = true;
-    }
-
-    if (placed) bucketed.add(tag);
-  }
-
-  return { byPrefix, short, tags };
-}
-
-/**
- * Narrows a query to the tags worth scoring.
- *
- * Prefix and substring matches live in the query's own bucket, so a populated
- * bucket is scored alone. A sparse bucket means the query is likely a fuzzy
- * subsequence ("lngr" -> "long_hair"), which can match tags in any bucket, so
- * those fall back to the full vocabulary rather than silently dropping results.
- */
-function collectCandidates(tags: readonly TagRecord[], query: string): readonly TagRecord[] {
-  if (query.length < INDEX_PREFIX_LENGTH) return tags;
-
-  const index = getOrBuildIndex(tags);
-  const bucket = index.byPrefix.get(query.slice(0, INDEX_PREFIX_LENGTH));
-
-  if (!bucket) return index.short.length > 0 ? index.short : tags;
-  if (bucket.length < SPARSE_BUCKET_THRESHOLD) return tags;
-
-  return index.short.length > 0 ? [...bucket, ...index.short] : bucket;
-}
-
-/**
- * Below this many bucket entries a prefix lookup is too selective to be useful,
- * so the query is more likely fuzzy and the full scan is worth its cost.
- */
-const SPARSE_BUCKET_THRESHOLD = 20;
-
-/**
- * Caches the index against the vocabulary array identity, so repeated keystrokes
- * reuse one build. A new import produces a new array and therefore a new index.
- */
-let cachedIndex: { tags: readonly TagRecord[]; index: TagIndex } | null = null;
-
-export function getOrBuildIndex(tags: readonly TagRecord[]): TagIndex {
-  if (cachedIndex && cachedIndex.tags === tags) return cachedIndex.index;
-  const index = createTagIndex(tags);
-  cachedIndex = { tags, index };
-  return index;
-}
-
 /**
  * Finds the tag fragment being typed at `caret`, plus the range to replace.
  *
  * Tags are comma separated, so the fragment runs from the previous comma to the
- * caret. Returns null when the caret sits in an obviously non-tag context
- * (inside a parenthesized weight, or right after a newline with nothing typed).
+ * caret. Returns null when the caret sits in a context that is not a tag:
+ * inside parenthesized weight syntax, or after trailing whitespace.
  */
 export function getTagFragmentAtCaret(
   value: string,

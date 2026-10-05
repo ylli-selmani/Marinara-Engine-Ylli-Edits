@@ -1,14 +1,18 @@
 /**
- * Tag autocomplete core (#TBD): the CSV vocabulary parser and fuzzy matcher that
- * back booru-style completion in image prompt/tag fields.
+ * Tag autocomplete (#TBD): the CSV vocabulary parser and fuzzy matcher that back
+ * booru-style completion in image prompt/tag fields.
  *
  * The vocabulary is user-supplied, so the parser must tolerate the real-world
  * shapes Danbooru exports produce: quoted alias lists containing commas,
  * unquoted single aliases, empty alias columns, blank lines, and a UTF-8 BOM.
+ *
+ * Parsing lives in `packages/shared` so the client preview and any server-side
+ * import agree on the same bytes; matching and caret editing stay client-side.
  */
 import assert from "node:assert/strict";
 
-const { applyTagCompletion, displayTagName, getTagFragmentAtCaret, matchTags, parseTagCsv, splitCsvLine } =
+const { parseTagCsv, splitTagCsvLine: splitCsvLine } = await import("../../packages/shared/src/utils/tag-csv.js");
+const { applyTagCompletion, createTagIndex, displayTagName, getTagFragmentAtCaret, matchTags } =
   await import("../../packages/client/src/lib/tag-autocomplete.js");
 
 // --- CSV field splitting ----------------------------------------------------
@@ -41,7 +45,7 @@ assert.deepEqual(
 
 // --- Vocabulary parsing -----------------------------------------------------
 
-const parsed = parseTagCsv(
+const parsedFile = parseTagCsv(
   [
     '1girl,0,8496612,"sole_female,1girls"',
     "commentary_request,5,6398122,/com",
@@ -53,6 +57,7 @@ const parsed = parseTagCsv(
     'dupe,0,2,"y"',
   ].join("\n"),
 );
+const parsed = parsedFile.tags;
 
 assert.deepEqual(
   parsed.map((entry) => entry.name),
@@ -66,8 +71,28 @@ assert.deepEqual(parsed[2].aliases, [], "an empty alias column yields no aliases
 assert.equal(parsed[1].category, 5, "the category column is parsed");
 assert.equal(parsed[4].postCount, 1, "the first duplicate wins");
 
-assert.equal(parseTagCsv('\uFEFF1girl,0,5,"a"')[0].name, "1girl", "a UTF-8 BOM is stripped");
-assert.equal(parseTagCsv('1girl,0,5,"a"\n2girls,0,4,"b"', { limit: 1 }).length, 1, "the limit is honored");
+// Repairs and skips are reported rather than silently applied.
+assert.equal(parsedFile.skippedRows, 1, "the duplicate row is reported as skipped");
+assert.ok(
+  parsedFile.issues.some((issue) => issue.code === "duplicate_name"),
+  "the duplicate is reported by code",
+);
+assert.equal(parsedFile.repairedRows, 0, "a clean file reports no repairs");
+
+// An unquoted comma-separated alias list splits into extra columns; the aliases
+// must be rejoined rather than dropped.
+{
+  const repaired = parseTagCsv("hair,0,10,/h,hairstyle,hairdo");
+  assert.deepEqual(repaired.tags[0]!.aliases, ["/h", "hairstyle", "hairdo"], "extra columns rejoin into aliases");
+  assert.ok(repaired.repairedRows >= 1, "the repair is reported");
+  assert.ok(
+    repaired.issues.some((issue) => issue.code === "unquoted_aliases"),
+    "the unquoted alias list is reported by code",
+  );
+}
+
+assert.equal(parseTagCsv('\uFEFF1girl,0,5,"a"').tags[0]!.name, "1girl", "a UTF-8 BOM is stripped");
+assert.equal(parseTagCsv('1girl,0,5,"a"\n2girls,0,4,"b"', { limit: 1 }).tags.length, 1, "the limit is honored");
 
 // --- Caret fragment detection -----------------------------------------------
 
@@ -128,7 +153,7 @@ const vocabulary = parseTagCsv(
     "long_hair_ornament,0,500,",
     "solo,0,7131665,",
   ].join("\n"),
-);
+).tags;
 
 assert.equal(matchTags(vocabulary, "long_ha", 5)[0]?.tag.name, "long_hair", "the popular prefix match ranks first");
 
@@ -144,6 +169,36 @@ assert.deepEqual(matchTags(vocabulary, "zzzznomatch", 5), [], "a query with no s
 const subsequenceHit = matchTags(vocabulary, "lngr", 5);
 assert.ok(subsequenceHit.length > 0, "fuzzy subsequence matching still finds candidates");
 
+// --- Candidate narrowing must not lose or duplicate results -----------------
+//
+// Both bugs below only appear once a 2-character bucket is well populated, which
+// is why they need a fixture larger than the tiny ones above.
+
+/** Builds a vocabulary with `count` filler tags sharing a 2-char prefix. */
+const withFiller = (prefix: string, count: number, extra: string[]): ReturnType<typeof parseTagCsv>["tags"] =>
+  parseTagCsv(
+    [...Array.from({ length: count }, (_, index) => `${prefix}_filler_${index},0,${10 + index},`), ...extra].join("\n"),
+  ).tags;
+
+// A tag whose name is long and whose alias is 1 char used to land in both the
+// prefix bucket and the short-key list, yielding two identical rows and a
+// duplicate React key in the popup.
+{
+  const tags = withFiller("al", 30, ["alpha,0,10,a"]);
+  const names = matchTags(tags, "al", 50).map((match) => match.tag.name);
+  assert.equal(names.length, new Set(names).size, "a tag must not appear twice in one result set");
+  assert.equal(names.filter((name) => name === "alpha").length, 1, "the short-alias tag appears exactly once");
+}
+
+// A subsequence match can live outside the query's bucket. Restricting the
+// candidate set to a populated bucket used to make abbreviations of popular tags
+// return nothing.
+{
+  const tags = withFiller("bh", 30, ["blue_hair_large,0,5000,"]);
+  const names = matchTags(tags, "bhl", 50).map((match) => match.tag.name);
+  assert.ok(names.includes("blue_hair_large"), `a fuzzy match outside a populated bucket must be found: ${names}`);
+}
+
 // --- Real-world CSV scale (opt-in) ------------------------------------------
 //
 // The shipped regression stays hermetic. When a real export is available on the
@@ -155,7 +210,7 @@ if (realCsvPath) {
   const csvText = readFileSync(realCsvPath, "utf8");
 
   const parseStarted = Date.now();
-  const realTags = parseTagCsv(csvText);
+  const realTags = parseTagCsv(csvText).tags;
   const parseMs = Date.now() - parseStarted;
 
   assert.ok(realTags.length > 100_000, `expected a large vocabulary, got ${realTags.length}`);
@@ -176,6 +231,25 @@ if (realCsvPath) {
   }
   const perQueryMs = (Date.now() - matchStarted) / rounds;
   assert.ok(perQueryMs < 16, `matching took ${perQueryMs.toFixed(2)}ms per query, over one frame`);
+
+  // A full-vocabulary scan on every keystroke also has to stay inside a frame,
+  // and a fuzzy abbreviation must not degrade into one.
+  for (const probe of ["lngr", "bhl", "hair", "sh"]) {
+    const started = Date.now();
+    const queryRounds = 50;
+    for (let index = 0; index < queryRounds; index += 1) {
+      matchTags(realTags, probe, 20);
+    }
+    const perProbeMs = (Date.now() - started) / queryRounds;
+    assert.ok(perProbeMs < 16, `"${probe}" took ${perProbeMs.toFixed(2)}ms per query, over one frame`);
+  }
+
+  // Building the index must not be quadratic in the vocabulary size; an O(n^2)
+  // membership check made this take ~26s on a 126k-tag file.
+  const indexStarted = Date.now();
+  createTagIndex(realTags);
+  const indexMs = Date.now() - indexStarted;
+  assert.ok(indexMs < 2_000, `indexing ${realTags.length} tags took ${indexMs}ms, over the 2s budget`);
 
   assert.equal(matchTags(realTags, "long_ha", 5)[0]?.tag.name, "long_hair", "real prefix match ranks correctly");
 

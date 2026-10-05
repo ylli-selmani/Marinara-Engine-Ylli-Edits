@@ -73,7 +73,6 @@ export function useTagAutocomplete({
   const tags = useTagAutocompleteStore((state) => state.tags);
   const storeEnabled = useTagAutocompleteStore((state) => state.enabled);
   const appendComma = useTagAutocompleteStore((state) => state.appendComma);
-  const maxResults = useTagAutocompleteStore((state) => state.maxResults);
 
   const [query, setQuery] = useState("");
   const [anchor, setAnchor] = useState<number | null>(null);
@@ -97,8 +96,8 @@ export function useTagAutocomplete({
 
   const matches = useMemo(() => {
     if (!active || !query) return [];
-    return matchTags(tags, query, maxResults);
-  }, [active, query, tags, maxResults]);
+    return matchTags(tags, query);
+  }, [active, query, tags]);
 
   const close = useCallback(() => {
     setQuery("");
@@ -128,10 +127,17 @@ export function useTagAutocomplete({
   const handleSelect = useCallback(
     (match: TagMatch) => {
       const textarea = getTextarea();
-      const range = rangeRef.current;
-      if (!textarea || !range) return;
+      if (!textarea) return;
 
-      const result = applyTagCompletion(valueRef.current, range, match.tag.name, { appendComma });
+      // Recompute the range from the live selection rather than trusting the one
+      // captured at refresh time. A mouse click, Ctrl+A, Home/End, or a selection
+      // change produces no onChange and no popup-open keydown, so the cached range
+      // can be stale; applying it would overwrite text the user did not target.
+      const live = getTagFragmentAtCaret(textarea.value, textarea.selectionStart);
+      const range = live ?? rangeRef.current;
+      if (!range) return;
+
+      const result = applyTagCompletion(textarea.value, range, match.tag.name, { appendComma });
       onChange(result.value);
 
       // Restore the caret after React commits the new value.
@@ -197,6 +203,22 @@ export function useTagAutocomplete({
   useEffect(() => {
     if (!active) close();
   }, [active, close]);
+
+  // Re-evaluate on caret moves that produce neither a change nor a keydown, such
+  // as a mouse click or Ctrl+A. Without this the popup would keep showing the
+  // previous fragment's suggestions.
+  useEffect(() => {
+    const textarea = getTextarea();
+    if (!active || !textarea) return;
+
+    const onSelectionChange = () => {
+      if (document.activeElement !== textarea) return;
+      refresh();
+    };
+
+    document.addEventListener("selectionchange", onSelectionChange);
+    return () => document.removeEventListener("selectionchange", onSelectionChange);
+  }, [active, getTextarea, refresh]);
 
   const isOpen = active && anchor !== null && matches.length > 0;
 

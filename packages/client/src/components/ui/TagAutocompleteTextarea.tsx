@@ -1,5 +1,4 @@
 import { useRef } from "react";
-import type { ReactNode } from "react";
 
 import { cn } from "../../lib/utils";
 import { useTagAutocomplete } from "../../hooks/use-tag-autocomplete";
@@ -12,12 +11,9 @@ interface TagAutocompleteTextareaProps {
   enabled?: boolean;
   rows?: number;
   placeholder?: string;
-  ariaLabel?: string;
   spellCheck?: boolean;
   maxLength?: number;
   className?: string;
-  /** Rendered directly after the textarea, inside the same relative wrapper. */
-  footer?: ReactNode;
 }
 
 /**
@@ -36,11 +32,9 @@ export function TagAutocompleteTextarea({
   enabled = true,
   rows = 6,
   placeholder,
-  ariaLabel,
   spellCheck = true,
   maxLength,
   className,
-  footer,
 }: TagAutocompleteTextareaProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const autocomplete = useTagAutocomplete({ value, onChange, enabled, textareaRef });
@@ -52,7 +46,6 @@ export function TagAutocompleteTextarea({
         value={value}
         {...autocomplete.textareaProps}
         rows={rows}
-        aria-label={ariaLabel}
         placeholder={placeholder}
         spellCheck={spellCheck}
         maxLength={maxLength}
@@ -64,7 +57,6 @@ export function TagAutocompleteTextarea({
         )}
       />
       <TagAutocompleteOverlay autocomplete={autocomplete} textareaRef={textareaRef} />
-      {footer}
     </div>
   );
 }

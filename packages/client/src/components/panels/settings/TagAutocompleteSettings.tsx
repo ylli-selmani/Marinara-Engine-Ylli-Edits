@@ -34,9 +34,19 @@ export function TagAutocompleteSettings({ anchorId }: { anchorId?: string }) {
     setImporting(true);
     try {
       const text = await file.text();
-      const count = importCsv(text, file.name);
+      const { count, report } = importCsv(text, file.name);
       if (count === 0) {
         toast.error(t("settings.tagAutocomplete.importEmpty"));
+        return;
+      }
+      if (report.skippedRows > 0 || report.repairedRows > 0) {
+        toast.warning(
+          t("settings.tagAutocomplete.importedWithIssues", {
+            count: count.toLocaleString(),
+            skipped: report.skippedRows.toLocaleString(),
+            repaired: report.repairedRows.toLocaleString(),
+          }),
+        );
         return;
       }
       toast.success(t("settings.tagAutocomplete.imported", { count: count.toLocaleString() }));

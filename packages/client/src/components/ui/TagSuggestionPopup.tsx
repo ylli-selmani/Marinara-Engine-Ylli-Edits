@@ -32,6 +32,9 @@ interface TagSuggestionPopupProps {
   onHover: (index: number) => void;
 }
 
+/** Popup width in px. Kept in sync with the class below so clamping can use it. */
+const POPUP_WIDTH = 320;
+
 /**
  * Measures the caret's on-screen position inside a textarea.
  *
@@ -125,22 +128,62 @@ export function TagSuggestionPopup({
       return;
     }
 
+    /**
+     * The popup is `position: fixed`, so its coordinates are viewport-relative —
+     * window scroll must NOT be added. It still has to respect the nearest
+     * clipping ancestor, because a `fixed` element is contained (and clipped) by
+     * any ancestor that establishes a containing block. Prompt fields inside a
+     * modal body or a settings drawer sit in an `overflow-y-auto` container, so
+     * clamping to the viewport alone lets the list be cut off or hidden.
+     */
+    const clippingRectOf = (element: HTMLElement): DOMRect => {
+      let node = element.parentElement;
+      let bounds = new DOMRect(0, 0, window.innerWidth, window.innerHeight);
+
+      while (node && node !== document.body) {
+        const style = window.getComputedStyle(node);
+        const clips =
+          /(auto|scroll|hidden|clip)/.test(style.overflowY) || /(auto|scroll|hidden|clip)/.test(style.overflowX);
+
+        if (clips) {
+          const rect = node.getBoundingClientRect();
+          bounds = new DOMRect(
+            Math.max(bounds.left, rect.left),
+            Math.max(bounds.top, rect.top),
+            Math.min(bounds.right, rect.right) - Math.max(bounds.left, rect.left),
+            Math.min(bounds.bottom, rect.bottom) - Math.max(bounds.top, rect.top),
+          );
+        }
+
+        node = node.parentElement;
+      }
+
+      return bounds;
+    };
+
     const update = () => {
       const rect = textarea.getBoundingClientRect();
       const offset = measureCaretOffset(textarea, caret);
       const lineHeight = parseFloat(window.getComputedStyle(textarea).lineHeight) || 20;
-
-      // Anchor below the caret line; flip above when there is no room below.
-      const spaceBelow = window.innerHeight - (rect.top + offset.top + lineHeight);
       const popupHeight = popupRef.current?.offsetHeight ?? 240;
-      const openUpward = spaceBelow < popupHeight && offset.top > popupHeight;
+      const popupWidth = popupRef.current?.offsetWidth ?? POPUP_WIDTH;
+      const bounds = clippingRectOf(textarea);
 
-      setPosition({
-        top: openUpward
-          ? rect.top + offset.top - popupHeight - 4 + window.scrollY
-          : rect.top + offset.top + lineHeight + 4 + window.scrollY,
-        left: Math.min(rect.left + offset.left + window.scrollX, window.innerWidth - 340),
-      });
+      const caretTop = rect.top + offset.top;
+      const spaceBelow = bounds.bottom - (caretTop + lineHeight);
+      const spaceAbove = caretTop - bounds.top;
+      const openUpward = spaceBelow < popupHeight && spaceAbove > spaceBelow;
+
+      const rawTop = openUpward ? caretTop - popupHeight - 4 : caretTop + lineHeight + 4;
+      // Clamp into the visible band so a short container still shows the list.
+      const maxTop = Math.max(bounds.top + 4, bounds.bottom - popupHeight - 4);
+      const top = Math.min(Math.max(rawTop, bounds.top + 4), maxTop);
+
+      const rawLeft = rect.left + offset.left;
+      const maxLeft = Math.max(bounds.left + 4, bounds.right - popupWidth - 4);
+      const left = Math.min(Math.max(rawLeft, bounds.left + 4), maxLeft);
+
+      setPosition({ top, left });
     };
 
     update();
@@ -166,7 +209,7 @@ export function TagSuggestionPopup({
       ref={popupRef}
       role="listbox"
       aria-label={t("ui.ui.tagsuggestionpopup.tagSuggestions")}
-      className="fixed z-[9999] max-h-60 w-[20rem] overflow-y-auto rounded-lg bg-[var(--popover)] py-1 text-[var(--popover-foreground)] shadow-xl ring-1 ring-[var(--border)]"
+      className="fixed z-[9999] max-h-60 w-80 overflow-y-auto rounded-lg bg-[var(--popover)] py-1 text-[var(--popover-foreground)] shadow-xl ring-1 ring-[var(--border)]"
       style={{ top: position.top, left: position.left }}
     >
       {matches.map((match, index) => (
