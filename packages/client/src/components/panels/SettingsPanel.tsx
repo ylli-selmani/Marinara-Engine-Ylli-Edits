@@ -2214,6 +2214,14 @@ function ImageStyleProfilesEditor({
     "Create a portrait of Mira, anime style, best quality, high quality, detailed eyes. Avoid blurry, text, watermark. no extra fingers",
   );
   const selected = settings.profiles.find((profile) => profile.id === selectedId) ?? settings.profiles[0]!;
+  // Keep `selectedId` pointed at a profile that actually exists. It is initialized
+  // once from the default profile id, but the stored default can name a profile
+  // that is no longer present, which left every edit targeting a missing id.
+  useEffect(() => {
+    if (!settings.profiles.some((profile) => profile.id === selectedId)) {
+      setSelectedId(selected.id);
+    }
+  }, [selected.id, selectedId, settings.profiles]);
   const preview = useMemo(
     () =>
       compileImagePrompt({
@@ -2242,23 +2250,51 @@ function ImageStyleProfilesEditor({
     [onChange],
   );
 
+  // `normalizeImageStyleProfileSettings` returns a fresh object on every call, so
+  // `selected` is a new identity each render. Keep the latest values in refs and
+  // read them inside the updater instead of capturing them, and resolve the target
+  // profile by id here so a stale or unknown `selectedId` cannot silently match
+  // nothing (which made edits vanish while typing).
+  const valueRef = useRef(value);
+  valueRef.current = value;
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
+
+  /** Resolves the profile an edit should apply to, falling back to the first. */
+  const resolveTargetId = useCallback((profiles: readonly ImageStyleProfile[]) => {
+    const requested = selectedIdRef.current;
+    if (profiles.some((profile) => profile.id === requested)) return requested;
+    return profiles[0]?.id ?? requested;
+  }, []);
+
   const updateSelected = useCallback(
     (patch: Partial<ImageStyleProfile>) => {
+      const current = normalizeImageStyleProfileSettings(valueRef.current);
+      const targetId = resolveTargetId(current.profiles);
       commit({
-        ...settings,
-        profiles: settings.profiles.map((profile) =>
-          profile.id === selected.id ? { ...profile, ...patch, id: selected.id } : profile,
+        ...current,
+        profiles: current.profiles.map((profile) =>
+          profile.id === targetId ? { ...profile, ...patch, id: profile.id } : profile,
         ),
       });
     },
-    [commit, selected.id, settings],
+    [commit, resolveTargetId],
   );
 
   const updateSubjectTags = useCallback(
     (kind: ImagePromptKind, tags: string) => {
-      updateSelected({ subjectTags: { ...selected.subjectTags, [kind]: tags } });
+      const current = normalizeImageStyleProfileSettings(valueRef.current);
+      const targetId = resolveTargetId(current.profiles);
+      commit({
+        ...current,
+        profiles: current.profiles.map((profile) =>
+          profile.id === targetId
+            ? { ...profile, id: profile.id, subjectTags: { ...profile.subjectTags, [kind]: tags } }
+            : profile,
+        ),
+      });
     },
-    [selected.subjectTags, updateSelected],
+    [commit, resolveTargetId],
   );
 
   const cloneSelected = useCallback(() => {

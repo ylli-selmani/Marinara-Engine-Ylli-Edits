@@ -48,6 +48,8 @@ export interface UseTagAutocompleteResult {
   isOpen: boolean;
   handleSelect: (match: TagMatch) => void;
   setActiveIndex: (index: number) => void;
+  /** Closes the list until the next edit, for outside presses and Escape. */
+  dismiss: () => void;
   /** Spread onto the textarea to wire completion without replacing existing handlers. */
   textareaProps: TagAutocompleteTextareaProps;
 }
@@ -105,6 +107,16 @@ export function useTagAutocomplete({
     rangeRef.current = null;
   }, []);
 
+  // After an explicit dismissal, stay closed until the user actually edits the
+  // text again. Without this, the selectionchange listener immediately reopens
+  // the list the user just clicked away from.
+  const suppressedRef = useRef(false);
+
+  const dismiss = useCallback(() => {
+    suppressedRef.current = true;
+    close();
+  }, [close]);
+
   const refresh = useCallback(() => {
     const textarea = getTextarea();
     if (!active || !textarea) {
@@ -117,6 +129,8 @@ export function useTagAutocomplete({
       close();
       return;
     }
+
+    if (suppressedRef.current) return;
 
     rangeRef.current = { start: fragment.start, end: fragment.end };
     setQuery(fragment.query);
@@ -175,7 +189,7 @@ export function useTagAutocomplete({
           }
           case "Escape":
             event.preventDefault();
-            close();
+            dismiss();
             return;
           default:
             // Let the keystroke land, then re-evaluate from the new caret.
@@ -187,16 +201,24 @@ export function useTagAutocomplete({
       // falls through to the caller's own handler.
       onKeyDown?.(event);
     },
-    [activeIndex, close, handleSelect, matches, onKeyDown, refresh],
+    [activeIndex, dismiss, handleSelect, matches, onKeyDown, refresh],
   );
 
   const handleChange = useCallback(
     (event: ChangeEvent<HTMLTextAreaElement>) => {
+      // The textarea is controlled by the caller's `value` prop, so the edit has to
+      // be published or the parent re-renders the old value and the keystroke is
+      // silently discarded. Callers that pass `onChangeEvent` (MacroTextarea) run
+      // their own formatting and publish the result themselves, so only the plain
+      // case publishes here.
+      if (!onChangeEvent) onChange(event.target.value);
       onChangeEvent?.(event);
+      // An edit is an explicit intent to see suggestions again.
+      suppressedRef.current = false;
       // The DOM value is already updated here, so the fragment can be read now.
       requestAnimationFrame(refresh);
     },
-    [onChangeEvent, refresh],
+    [onChange, onChangeEvent, refresh],
   );
 
   // Close when the field loses the vocabulary or the feature is turned off.
@@ -229,6 +251,7 @@ export function useTagAutocomplete({
     isOpen,
     handleSelect,
     setActiveIndex,
+    dismiss,
     textareaProps: { onKeyDown: handleKeyDown, onChange: handleChange },
   };
 }

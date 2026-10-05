@@ -36,6 +36,7 @@ import {
 } from "./stores/ui.store";
 import { useSidecarStore } from "./stores/sidecar.store";
 import { useDialogStore } from "./stores/dialog.store";
+import { useTagAutocompleteStore } from "./stores/tag-autocomplete.store";
 import { api, requestTimeoutSignal } from "./lib/api-client";
 import { forceRefreshSpa, reloadBrowser } from "./lib/browser-runtime";
 import { recordClientError } from "./lib/client-runtime-diagnostics";
@@ -536,6 +537,13 @@ export function App() {
   // [#3104 diagnostic] warn on long main-thread tasks (see lib/perf-diagnostics.ts)
   useEffect(() => {
     installLongTaskWarner();
+  }, []);
+
+  // Restore the imported tag vocabulary. It lives in IndexedDB rather than the
+  // persisted settings store because a Danbooru export exceeds the localStorage
+  // quota, so it has to be read back explicitly on startup.
+  useEffect(() => {
+    void useTagAutocompleteStore.getState().hydrate();
   }, []);
 
   // Hardware / gesture back dismisses the topmost overlay instead of exiting.

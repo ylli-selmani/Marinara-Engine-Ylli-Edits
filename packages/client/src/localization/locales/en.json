@@ -3247,6 +3247,7 @@
   "settings.tagAutocomplete.issue.unquoted_aliases": "Alias list was not quoted; {{detail}} extra columns were rejoined as aliases.",
   "settings.tagAutocomplete.lineLabel": "Line {{line}}:",
   "settings.tagAutocomplete.loaded": "{{count}} tags loaded from {{name}}.",
+  "settings.tagAutocomplete.loadingVocabulary": "Loading saved vocabulary…",
   "settings.tagAutocomplete.moreIssues": "{{count}} more issues",
   "settings.tagAutocomplete.noVocabulary": "No tags loaded yet. Import a Danbooru-style CSV to get suggestions.",
   "settings.tagAutocomplete.pastedVocabulary": "Pasted vocabulary",

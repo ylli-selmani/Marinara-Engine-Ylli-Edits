@@ -99,21 +99,74 @@ assert.equal(parseTagCsv('1girl,0,5,"a"\n2girls,0,4,"b"', { limit: 1 }).tags.len
 // `start` skips the separator whitespace so the space after the comma survives.
 assert.deepEqual(
   getTagFragmentAtCaret("masterpiece, long_ha", 20),
-  { query: "long_ha", start: 13, end: 20 },
+  { query: "long ha", start: 13, end: 20 },
   "the fragment runs from after the separator to the caret",
 );
 
 assert.deepEqual(
   getTagFragmentAtCaret("masterpiece,long_ha", 19),
-  { query: "long_ha", start: 12, end: 19 },
+  { query: "long ha", start: 12, end: 19 },
   "a fragment with no separating space works too",
 );
 
-assert.deepEqual(getTagFragmentAtCaret("long_ha", 7), { query: "long_ha", start: 0, end: 7 }, "the first tag works");
+assert.deepEqual(getTagFragmentAtCaret("long_ha", 7), { query: "long ha", start: 0, end: 7 }, "the first tag works");
 
 assert.equal(getTagFragmentAtCaret("long_hair ", 10), null, "a trailing space closes the popup");
 assert.equal(getTagFragmentAtCaret("(masterpiece:1.2", 15), null, "weight syntax must not be completed");
 assert.equal(getTagFragmentAtCaret("masterpiece, ", 13), null, "an empty field has nothing to complete");
+
+// --- Caret in the middle of a word -------------------------------------------
+// The fragment must span the whole tag, not stop at the caret. Ending at the
+// caret is what previously cut a tag in half and left the tail behind.
+
+assert.deepEqual(
+  getTagFragmentAtCaret("long_hair", 4),
+  { query: "long hair", start: 0, end: 9 },
+  "clicking mid-tag selects the entire tag for replacement",
+);
+
+assert.deepEqual(
+  getTagFragmentAtCaret("masterpiece, long_hair, solo", 17),
+  { query: "long hair", start: 13, end: 22 },
+  "a mid-tag caret spans only that tag, not the neighbours",
+);
+
+// Completing from a mid-word caret must replace the whole tag and keep the rest.
+assert.equal(
+  applyTagCompletion("long_hair, solo", getTagFragmentAtCaret("long_hair, solo", 4)!, "blue_hair").value,
+  "blue hair, solo",
+  "a mid-tag completion replaces the whole tag and preserves the remainder",
+);
+
+// --- Weight syntax -----------------------------------------------------------
+// `1.1::toon` is a weight prefix plus a tag; only the tag is completed.
+
+assert.deepEqual(
+  getTagFragmentAtCaret("-1::toon", 8),
+  { query: "toon", start: 4, end: 8 },
+  "a negative weight prefix is stripped before matching",
+);
+
+assert.deepEqual(
+  getTagFragmentAtCaret("1.1::toon", 8),
+  { query: "toon", start: 5, end: 9 },
+  "a positive weight prefix is stripped before matching",
+);
+
+assert.equal(getTagFragmentAtCaret("-1::", 4), null, "a bare weight value has no tag to complete");
+
+assert.deepEqual(
+  getTagFragmentAtCaret("masterpiece, 1.15::toon", 22),
+  { query: "toon", start: 19, end: 23 },
+  "weight syntax after another tag resolves to the tag after the prefix",
+);
+
+// A completion must not double up a separator that is already present.
+assert.equal(
+  applyTagCompletion("long_ha, solo", { start: 0, end: 7 }, "long_hair").value,
+  "long hair, solo",
+  "an existing separator is not duplicated",
+);
 
 // --- Completion application -------------------------------------------------
 
@@ -129,10 +182,12 @@ assert.equal(
   "parentheses are escaped so they are not read as weights",
 );
 
+// The range is derived from the same helper the hook uses, so this pins the real
+// pairing rather than a hand-written range that no longer occurs.
 assert.equal(
-  applyTagCompletion("master, long_ha  ", { start: 8, end: 16 }, "long_hair").value,
+  applyTagCompletion("master, long_ha  ", getTagFragmentAtCaret("master, long_ha  ", 14)!, "long_hair").value,
   "master, long hair, ",
-  "trailing whitespace after the fragment collapses instead of doubling up",
+  "trailing whitespace after the fragment is consumed, not doubled",
 );
 
 assert.equal(
@@ -168,6 +223,38 @@ assert.deepEqual(matchTags(vocabulary, "zzzznomatch", 5), [], "a query with no s
 
 const subsequenceHit = matchTags(vocabulary, "lngr", 5);
 assert.ok(subsequenceHit.length > 0, "fuzzy subsequence matching still finds candidates");
+// --- Space / underscore equivalence ------------------------------------------
+// The dataset stores `long_hair`, but prompts and aliases use spaces. Both
+// spellings must reach the same tag.
+
+assert.equal(
+  matchTags(vocabulary, "long hair", 5)[0]?.tag.name,
+  "long_hair",
+  "a spaced query matches the underscored name",
+);
+
+assert.equal(matchTags(vocabulary, "long_hair", 5)[0]?.tag.name, "long_hair", "the underscored query still matches");
+
+assert.equal(
+  matchTags(vocabulary, "long hair ornament", 5)[0]?.tag.name,
+  "long_hair_ornament",
+  "spaces resolve through a multi-word tag",
+);
+
+assert.equal(matchTags(vocabulary, "long  hair", 5)[0]?.tag.name, "long_hair", "repeated separators collapse");
+
+// Mixed separators must not produce duplicate suggestions.
+const spacedVocabulary = parseTagCsv(
+  ['long_hair,0,5000,"long hair,longhair"', "long_hair_large,0,10,"].join("\n"),
+).tags;
+const spacedMatches = matchTags(spacedVocabulary, "long hair", 20);
+const spacedNames = spacedMatches.map((match) => match.tag.name);
+assert.equal(
+  new Set(spacedNames).size,
+  spacedNames.length,
+  "a tag whose alias differs only by separators is listed once",
+);
+assert.equal(spacedNames[0], "long_hair", "the exact spaced form outranks the longer tag");
 
 // --- Candidate narrowing must not lose or duplicate results -----------------
 //

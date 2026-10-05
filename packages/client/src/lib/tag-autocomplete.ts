@@ -286,11 +286,26 @@ export function matchTags(tags: readonly TagRecord[], query: string, limit = 50)
 }
 
 /**
+ * Matches a weighted prompt segment like `1.1::toon` or `-1::2d`.
+ *
+ * A1111/NovelAI weight syntax prefixes a value with `n::`, so the text after the
+ * separator is the actual tag and the text before it is a number we must not
+ * treat as tag content.
+ */
+const WEIGHT_PREFIX = /^([-+]?\d*\.?\d+)\s*::/;
+
+/**
  * Finds the tag fragment being typed at `caret`, plus the range to replace.
  *
  * Tags are comma separated, so the fragment runs from the previous comma to the
- * caret. Returns null when the caret sits in a context that is not a tag:
- * inside parenthesized weight syntax, or after trailing whitespace.
+ * *end of the word under the caret* — not to the caret itself. Using the caret as
+ * the end is what mangled tags: clicking into the middle and completing replaced
+ * only the half before the pointer, leaving the remainder behind.
+ *
+ * Weight syntax is stripped from the front (`1.1::toon` completes `toon`) and
+ * makes the whole segment non-completable when it is a bare number (`-1::`).
+ *
+ * Returns null when the caret sits in a context that is not a tag.
  */
 export function getTagFragmentAtCaret(
   value: string,
@@ -301,23 +316,43 @@ export function getTagFragmentAtCaret(
   const before = value.slice(0, caret);
   const lastComma = before.lastIndexOf(",");
   const rawStart = lastComma + 1;
-  const rawFragment = before.slice(rawStart);
 
-  // Don't propose tags inside a weighting group like "(masterpiece:1.2".
+  // The word continues past the caret, so the replacement spans the whole tag.
+  // Only the run up to the next whitespace or comma belongs to it.
+  const after = value.slice(caret);
+  const trailing = after.match(/^[^,\s]*/)?.[0] ?? "";
+  const trailingSeparator = after.slice(trailing.length).match(/^\s*/)?.[0] ?? "";
+
+  const rawFragment = before.slice(rawStart) + trailing;
+
+  // Parenthesized weight groups are not tag names, so leave them alone.
   if (rawFragment.includes("(") || rawFragment.includes(")")) return null;
 
-  const query = normalizeTagQuery(rawFragment);
+  // Skip the separator space so a weight prefix is still recognized at the start
+  // of the fragment ("masterpiece, 1.15::toon").
+  const fragmentIndent = rawFragment.length - rawFragment.trimStart().length;
+
+  // Split any `1.1::` prefix off the front; the tag is what follows it.
+  const weightMatch = rawFragment.slice(fragmentIndent).match(WEIGHT_PREFIX);
+  const weightLength = weightMatch ? weightMatch[0].length : 0;
+  const tagPart = rawFragment.slice(fragmentIndent + weightLength);
+
+  const query = normalizeTagQuery(tagPart);
+  // A segment that is only a weight value ("-1::") has no tag to complete.
   if (!query) return null;
 
-  // Only complete the word currently under the caret, ignoring trailing space.
-  if (/\s$/.test(rawFragment)) return null;
+  // Once the user types a separator without typing on, the tag is finished:
+  // completing it now would fight the next tag they are starting. Text after the
+  // caret means a mid-word edit, which is still completable.
+  if (!trailing && /[\s,]$/.test(before)) return null;
 
-  // Skip the separator whitespace so the replaced range starts at the fragment
-  // itself; otherwise completing "masterpiece, long_ha" would eat the space
-  // after the comma and yield "masterpiece,long hair".
-  const leadingWhitespace = rawFragment.length - rawFragment.trimStart().length;
+  const leadingWhitespace = tagPart.length - tagPart.trimStart().length;
 
-  return { query, start: rawStart + leadingWhitespace, end: caret };
+  return {
+    query,
+    start: rawStart + fragmentIndent + weightLength + leadingWhitespace,
+    end: caret + trailing.length + trailingSeparator.length,
+  };
 }
 
 /**
@@ -336,10 +371,12 @@ export function applyTagCompletion(
   const label = displayTagName(tagName).replace(/([()\\])/g, "\\$1");
 
   const before = value.slice(0, range.start);
-  // Replace any trailing whitespace the user typed before the caret.
-  const after = value.slice(range.end).replace(/^\s+/, "");
+  // The range covers the fragment and its trailing separator, so whatever remains
+  // is the next tag. Preserve it, but don't leave two separators in a row.
+  const after = value.slice(range.end);
 
-  const insertion = `${label}${appendComma ? ", " : ""}`;
+  const needsSeparator = appendComma && !/^\s*,/.test(after);
+  const insertion = `${label}${needsSeparator ? ", " : ""}`;
   const nextValue = `${before}${insertion}${after}`;
 
   return { value: nextValue, caret: before.length + insertion.length };

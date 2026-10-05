@@ -2,6 +2,8 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { parseTagCsv, type ParsedTagCsv, type TagRecord } from "@marinara-engine/shared";
 
+import { clearStoredVocabulary, loadStoredVocabulary, saveStoredVocabulary } from "../lib/tag-vocabulary-store";
+
 /** The repair report for the last import, kept so the UI can explain what changed. */
 export type TagImportReport = Omit<ParsedTagCsv, "tags">;
 
@@ -9,9 +11,9 @@ export type TagImportReport = Omit<ParsedTagCsv, "tags">;
  * Holds the user-supplied tag vocabulary for booru-style autocomplete.
  *
  * Marinara ships no tag data, so this stays empty until the user imports a CSV.
- * The parsed records are never persisted — a 125k-tag scrape would blow the
- * localStorage quota — so only the settings and the source filename survive a
- * reload. The settings panel reports the empty state when that happens.
+ * The settings persist through localStorage (zustand's `persist`), but the parsed
+ * records are far too large for that quota and live in IndexedDB instead; see
+ * `tag-vocabulary-store.ts`. `hydrate()` restores them on startup.
  */
 interface TagAutocompleteState {
   /** Enable completion in opted-in fields. Off by default. */
@@ -24,14 +26,18 @@ interface TagAutocompleteState {
   tagCount: number;
   /** What the last import had to repair, for the import dialog's summary. */
   lastReport: TagImportReport | null;
+  /** True once the stored vocabulary has been read, so the UI can avoid flashing. */
+  hydrated: boolean;
 
-  /** In-memory vocabulary. Not persisted. */
+  /** In-memory vocabulary, mirrored to IndexedDB on import. */
   tags: TagRecord[];
 
   setEnabled: (enabled: boolean) => void;
   setAppendComma: (appendComma: boolean) => void;
   importCsv: (text: string, sourceName: string) => { count: number; report: TagImportReport };
   clearTags: () => void;
+  /** Restores the vocabulary saved by a previous session. */
+  hydrate: () => Promise<void>;
 }
 
 export const useTagAutocompleteStore = create<TagAutocompleteState>()(
@@ -42,6 +48,7 @@ export const useTagAutocompleteStore = create<TagAutocompleteState>()(
       sourceName: "",
       tagCount: 0,
       lastReport: null,
+      hydrated: false,
       tags: [],
 
       setEnabled: (enabled) => set({ enabled }),
@@ -49,11 +56,31 @@ export const useTagAutocompleteStore = create<TagAutocompleteState>()(
 
       importCsv: (text, sourceName) => {
         const { tags, ...report } = parseTagCsv(text);
-        set({ tags, tagCount: tags.length, sourceName, lastReport: report });
+        set({ tags, tagCount: tags.length, sourceName, lastReport: report, hydrated: true });
+        // Persist in the background; a failure only costs the next reload.
+        void saveStoredVocabulary(tags, sourceName);
         return { count: tags.length, report };
       },
 
-      clearTags: () => set({ tags: [], tagCount: 0, sourceName: "", lastReport: null }),
+      clearTags: () => {
+        set({ tags: [], tagCount: 0, sourceName: "", lastReport: null, hydrated: true });
+        void clearStoredVocabulary();
+      },
+
+      hydrate: async () => {
+        const stored = await loadStoredVocabulary();
+        set((state) => {
+          // Don't clobber a vocabulary imported while the read was in flight.
+          if (state.tags.length > 0) return { hydrated: true };
+          if (!stored) return { hydrated: true };
+          return {
+            tags: stored.tags,
+            tagCount: stored.tags.length,
+            sourceName: stored.sourceName,
+            hydrated: true,
+          };
+        });
+      },
     }),
     {
       name: "marinara-tag-autocomplete",

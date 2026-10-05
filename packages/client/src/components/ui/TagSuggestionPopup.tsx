@@ -9,7 +9,11 @@ import { cn } from "../../lib/utils";
 
 /**
  * Category colors mirroring the booru tag types, keyed by the CSV `type` column.
- * Values are the dark/light pair used by the a1111 tagcomplete convention.
+ *
+ * These are intentionally literal palette values rather than theme tokens: the
+ * color encodes the booru category, and users coming from a1111 tagcomplete read
+ * these hues as meaning (character = red, copyright = amber, and so on). Theming
+ * them would break that recognition. Same precedent as AgentEditor's icon colors.
  */
 const CATEGORY_COLORS: Record<number, string> = {
   "-1": "text-[var(--muted-foreground)]",
@@ -30,10 +34,14 @@ interface TagSuggestionPopupProps {
   caret: number;
   onSelect: (match: TagMatch) => void;
   onHover: (index: number) => void;
+  /** Called when the user presses outside the list and the field. */
+  onDismiss: () => void;
 }
 
 /** Popup width in px. Kept in sync with the class below so clamping can use it. */
 const POPUP_WIDTH = 320;
+/** Vertical space assumed before the popup has been measured. */
+const POPUP_FALLBACK_HEIGHT = 240;
 
 /**
  * Measures the caret's on-screen position inside a textarea.
@@ -116,10 +124,11 @@ export function TagSuggestionPopup({
   caret,
   onSelect,
   onHover,
+  onDismiss,
 }: TagSuggestionPopupProps) {
   const popupRef = useRef<HTMLDivElement>(null);
   const { t } = useTranslation();
-  const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
+  const [position, setPosition] = useState<{ top: number; left: number; maxWidth: number } | null>(null);
 
   useLayoutEffect(() => {
     const textarea = textareaRef && typeof textareaRef === "object" ? textareaRef.current : null;
@@ -165,8 +174,10 @@ export function TagSuggestionPopup({
       const rect = textarea.getBoundingClientRect();
       const offset = measureCaretOffset(textarea, caret);
       const lineHeight = parseFloat(window.getComputedStyle(textarea).lineHeight) || 20;
-      const popupHeight = popupRef.current?.offsetHeight ?? 240;
-      const popupWidth = popupRef.current?.offsetWidth ?? POPUP_WIDTH;
+      // The popup is measured once it exists. `offsetWidth`/`offsetHeight` reflect
+      // border-box, so the clamp uses the same geometry the browser lays out.
+      const popupHeight = popupRef.current?.offsetHeight || POPUP_FALLBACK_HEIGHT;
+      const popupWidth = popupRef.current?.offsetWidth || POPUP_WIDTH;
       const bounds = clippingRectOf(textarea);
 
       const caretTop = rect.top + offset.top;
@@ -180,17 +191,29 @@ export function TagSuggestionPopup({
       const top = Math.min(Math.max(rawTop, bounds.top + 4), maxTop);
 
       const rawLeft = rect.left + offset.left;
-      const maxLeft = Math.max(bounds.left + 4, bounds.right - popupWidth - 4);
+      // A narrow container (a settings card can be ~280px) cannot fit the popup at
+      // its natural width, so clamp against the space actually available instead of
+      // letting the list run past the edge. Prefer the caret's line start when the
+      // container is wide enough to matter, otherwise pin to its left edge.
+      const available = bounds.right - bounds.left - 8;
+      const effectiveWidth = Math.min(popupWidth, Math.max(available, 0));
+      const maxLeft = Math.max(bounds.left + 4, bounds.right - effectiveWidth - 4);
       const left = Math.min(Math.max(rawLeft, bounds.left + 4), maxLeft);
 
-      setPosition({ top, left });
+      setPosition({ top, left, maxWidth: effectiveWidth });
     };
 
     update();
 
+    // The first pass measures a popup that may not be laid out yet, so it falls
+    // back to the constant width. Re-running after paint clamps against the real
+    // box, which is what keeps the list from running past the right edge.
+    const remeasure = requestAnimationFrame(update);
+
     window.addEventListener("scroll", update, true);
     window.addEventListener("resize", update);
     return () => {
+      cancelAnimationFrame(remeasure);
       window.removeEventListener("scroll", update, true);
       window.removeEventListener("resize", update);
     };
@@ -202,6 +225,33 @@ export function TagSuggestionPopup({
     active?.scrollIntoView({ block: "nearest" });
   }, [activeIndex]);
 
+  // Dismiss on an outside press, matching ContextMenu's behaviour. Without this
+  // the list lingered after the user moved on. The textarea itself is excluded
+  // so clicking to reposition the caret refines the suggestions instead of
+  // closing them, and the frame delay keeps the opening keystroke from
+  // immediately dismissing the list.
+  useEffect(() => {
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (popupRef.current?.contains(target)) return;
+
+      const textarea = textareaRef && typeof textareaRef === "object" ? textareaRef.current : null;
+      if (textarea?.contains(target)) return;
+
+      onDismiss();
+    };
+
+    const frame = requestAnimationFrame(() => {
+      document.addEventListener("mousedown", onPointerDown);
+    });
+
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener("mousedown", onPointerDown);
+    };
+  }, [onDismiss, textareaRef]);
+
   if (matches.length === 0 || !position) return null;
 
   return createPortal(
@@ -209,8 +259,8 @@ export function TagSuggestionPopup({
       ref={popupRef}
       role="listbox"
       aria-label={t("ui.ui.tagsuggestionpopup.tagSuggestions")}
-      className="fixed z-[9999] max-h-60 w-80 overflow-y-auto rounded-lg bg-[var(--popover)] py-1 text-[var(--popover-foreground)] shadow-xl ring-1 ring-[var(--border)]"
-      style={{ top: position.top, left: position.left }}
+      className="glass-strong fixed z-[9999] max-h-60 w-80 overflow-y-auto rounded-xl py-1 text-xs text-[var(--popover-foreground)]"
+      style={{ top: position.top, left: position.left, maxWidth: position.maxWidth }}
     >
       {matches.map((match, index) => (
         <button
@@ -226,7 +276,7 @@ export function TagSuggestionPopup({
           }}
           onMouseEnter={() => onHover(index)}
           className={cn(
-            "flex w-full items-center gap-2 px-2.5 py-1 text-left text-xs",
+            "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors",
             index === activeIndex ? "bg-[var(--accent)]" : "hover:bg-[var(--accent)]/60",
           )}
         >
@@ -274,6 +324,7 @@ export function TagAutocompleteOverlay({
       caret={autocomplete.anchor}
       onSelect={autocomplete.handleSelect}
       onHover={autocomplete.setActiveIndex}
+      onDismiss={autocomplete.dismiss}
     />
   );
 }

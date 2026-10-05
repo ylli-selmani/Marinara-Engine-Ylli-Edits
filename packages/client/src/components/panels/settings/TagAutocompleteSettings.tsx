@@ -25,6 +25,7 @@ export function TagAutocompleteSettings({ anchorId }: { anchorId?: string }) {
   const appendComma = useTagAutocompleteStore((state) => state.appendComma);
   const tagCount = useTagAutocompleteStore((state) => state.tagCount);
   const sourceName = useTagAutocompleteStore((state) => state.sourceName);
+  const hydrated = useTagAutocompleteStore((state) => state.hydrated);
   const setEnabled = useTagAutocompleteStore((state) => state.setEnabled);
   const setAppendComma = useTagAutocompleteStore((state) => state.setAppendComma);
   const clearTags = useTagAutocompleteStore((state) => state.clearTags);
@@ -66,9 +67,11 @@ export function TagAutocompleteSettings({ anchorId }: { anchorId?: string }) {
           ) : null}
         </div>
         <p className="text-[0.625rem] leading-relaxed text-[var(--muted-foreground)]">
-          {tagCount > 0
-            ? t("settings.tagAutocomplete.loaded", { count: tagCount.toLocaleString(), name: sourceName })
-            : t("settings.tagAutocomplete.noVocabulary")}
+          {!hydrated
+            ? t("settings.tagAutocomplete.loadingVocabulary")
+            : tagCount > 0
+              ? t("settings.tagAutocomplete.loaded", { count: tagCount.toLocaleString(), name: sourceName })
+              : t("settings.tagAutocomplete.noVocabulary")}
         </p>
       </div>
 

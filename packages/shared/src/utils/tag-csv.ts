@@ -110,8 +110,29 @@ export function displayTagName(name: string): string {
   return name.replace(/_/g, " ");
 }
 
+/**
+ * Normalizes a query so it matches regardless of how the user separates words.
+ *
+ * Booru data stores `long_hair`, but the same tag is written `long hair` in
+ * prompts and aliases use spaces too. Both forms have to reach the same record,
+ * so underscores and whitespace collapse to a single space.
+ */
 export function normalizeTagQuery(query: string): string {
-  return query.trim().replace(/\s+/g, " ").toLowerCase();
+  return query
+    .trim()
+    .replace(/[_\s]+/g, " ")
+    .toLowerCase();
+}
+
+/**
+ * Normalizes a stored name or alias the same way as a query, so prefix buckets
+ * and comparisons line up across underscore and space spellings.
+ */
+export function normalizeTagKey(key: string): string {
+  return key
+    .trim()
+    .replace(/[_\s]+/g, " ")
+    .toLowerCase();
 }
 
 /**
@@ -235,7 +256,10 @@ function pushTag(
 ): void {
   tags.push({
     ...input,
-    searchKeys: [input.name, ...input.aliases].map((entry) => entry.toLowerCase()),
+    // Normalized the same way a query is, so `long hair` and `long_hair` both
+    // resolve here. Duplicates are dropped so scoring does not see the same key
+    // twice when a name and an alias differ only by separators.
+    searchKeys: [...new Set([input.name, ...input.aliases].map((entry) => normalizeTagKey(entry)))].filter(Boolean),
   });
 }
 
