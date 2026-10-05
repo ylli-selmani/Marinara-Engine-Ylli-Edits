@@ -1,10 +1,10 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FileUp, Trash2 } from "lucide-react";
-import { toast } from "sonner";
 
 import { useTagAutocompleteStore } from "../../../stores/tag-autocomplete.store";
 import { ToggleSetting } from "./SettingControls";
+import { TagCsvImportDialog } from "./TagCsvImportDialog";
 
 export const TAG_AUTOCOMPLETE_CONTROL_ID = "tag-autocomplete";
 
@@ -12,13 +12,14 @@ export const TAG_AUTOCOMPLETE_CONTROL_ID = "tag-autocomplete";
  * Settings > Advanced: booru tag autocomplete for image prompt fields.
  *
  * Marinara ships no tag data. The vocabulary always comes from a CSV the user
- * imports here — the same `<name>,<type>,<postCount>,"<aliases>"` layout the
- * a1111 tagcomplete extension uses, so an existing Danbooru export works as-is.
+ * imports — the same `<name>,<type>,<postCount>,"<aliases>"` layout the a1111
+ * tagcomplete extension uses, so an existing Danbooru export works as-is. Import
+ * opens a preview dialog rather than replacing the vocabulary on file pick,
+ * because these files are large and easy to grab the wrong one of.
  */
 export function TagAutocompleteSettings({ anchorId }: { anchorId?: string }) {
   const { t } = useTranslation();
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [importing, setImporting] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   const enabled = useTagAutocompleteStore((state) => state.enabled);
   const appendComma = useTagAutocompleteStore((state) => state.appendComma);
@@ -26,38 +27,7 @@ export function TagAutocompleteSettings({ anchorId }: { anchorId?: string }) {
   const sourceName = useTagAutocompleteStore((state) => state.sourceName);
   const setEnabled = useTagAutocompleteStore((state) => state.setEnabled);
   const setAppendComma = useTagAutocompleteStore((state) => state.setAppendComma);
-  const importCsv = useTagAutocompleteStore((state) => state.importCsv);
   const clearTags = useTagAutocompleteStore((state) => state.clearTags);
-
-  const handleFile = async (file: File | undefined) => {
-    if (!file) return;
-    setImporting(true);
-    try {
-      const text = await file.text();
-      const { count, report } = importCsv(text, file.name);
-      if (count === 0) {
-        toast.error(t("settings.tagAutocomplete.importEmpty"));
-        return;
-      }
-      if (report.skippedRows > 0 || report.repairedRows > 0) {
-        toast.warning(
-          t("settings.tagAutocomplete.importedWithIssues", {
-            count: count.toLocaleString(),
-            skipped: report.skippedRows.toLocaleString(),
-            repaired: report.repairedRows.toLocaleString(),
-          }),
-        );
-        return;
-      }
-      toast.success(t("settings.tagAutocomplete.imported", { count: count.toLocaleString() }));
-    } catch {
-      toast.error(t("settings.tagAutocomplete.importFailed"));
-    } finally {
-      setImporting(false);
-      // Reset so re-picking the same file still fires a change event.
-      if (inputRef.current) inputRef.current.value = "";
-    }
-  };
 
   return (
     <div id={anchorId} className="flex scroll-mt-3 flex-col gap-2">
@@ -75,22 +45,14 @@ export function TagAutocompleteSettings({ anchorId }: { anchorId?: string }) {
       />
 
       <div className="flex flex-col gap-1.5 px-1.5 pt-1">
-        <input
-          ref={inputRef}
-          type="file"
-          accept=".csv,text/csv"
-          className="hidden"
-          onChange={(event) => void handleFile(event.target.files?.[0])}
-        />
         <div className="flex items-center gap-2">
           <button
             type="button"
-            disabled={importing}
-            onClick={() => inputRef.current?.click()}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--secondary)] px-3 py-1.5 text-xs font-medium text-[var(--foreground)] ring-1 ring-[var(--border)] transition-colors hover:bg-[var(--accent)] disabled:opacity-50"
+            onClick={() => setImportOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--secondary)] px-3 py-1.5 text-xs font-medium text-[var(--foreground)] ring-1 ring-[var(--border)] transition-colors hover:bg-[var(--accent)]"
           >
             <FileUp className="h-3 w-3" />
-            {importing ? t("settings.tagAutocomplete.importing") : t("settings.tagAutocomplete.importCsv")}
+            {t("settings.tagAutocomplete.importCsv")}
           </button>
           {tagCount > 0 ? (
             <button
@@ -109,6 +71,8 @@ export function TagAutocompleteSettings({ anchorId }: { anchorId?: string }) {
             : t("settings.tagAutocomplete.noVocabulary")}
         </p>
       </div>
+
+      <TagCsvImportDialog open={importOpen} onClose={() => setImportOpen(false)} />
     </div>
   );
 }
