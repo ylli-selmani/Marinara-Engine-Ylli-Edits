@@ -8,46 +8,48 @@ import type { UseTagAutocompleteResult } from "../../hooks/use-tag-autocomplete"
 import { cn } from "../../lib/utils";
 
 /**
- * Chip styling per booru tag category, keyed by the CSV `type` column.
+ * Category spine colors, keyed by the CSV `type` column.
  *
- * A colored name alone left the meaning unguessable, so each row carries a labeled
- * pill instead. The colors stay literal palette values rather than theme tokens:
- * they encode the booru category, and users coming from a1111 tagcomplete read
- * these hues as meaning (artist = rose, copyright = amber, and so on). Theming
- * them would break that recognition.
- *
- * The pills reuse `.mari-editor-chip`, the same class the lorebook, preset, and
- * character tag chips use, so they match the rest of the app. General and unknown
- * categories take the accent variant, which resolves through
- * `--marinara-editor-accent` to `--marinara-chat-chrome-accent`.
+ * The category is carried by a thin colored edge on the row rather than a labeled
+ * pill: a pill sat in the middle of the row and stole width from the tag name and
+ * its alias, truncating exactly the text the user needs to read. An edge costs no
+ * horizontal space, so names and aliases get the full width back, and the category
+ * name is available on hover. The hues stay literal palette values rather than
+ * theme tokens because they encode the booru category, and users coming from a1111
+ * tagcomplete read them as meaning (artist = rose, copyright = amber, and so on).
  */
-const CATEGORY_CHIP_CLASS: Record<number, string> = {
-  1: "border-rose-400/40 bg-rose-400/15 text-rose-300",
-  3: "border-amber-400/40 bg-amber-400/15 text-amber-300",
-  4: "border-emerald-400/40 bg-emerald-400/15 text-emerald-300",
-  5: "border-sky-400/40 bg-sky-400/15 text-sky-300",
+const CATEGORY_SPINE_CLASS: Record<number, string> = {
+  0: "border-l-[var(--marinara-chat-chrome-accent)]",
+  1: "border-l-rose-400",
+  3: "border-l-amber-400",
+  4: "border-l-emerald-400",
+  5: "border-l-sky-400",
+  7: "border-l-violet-400",
+  8: "border-l-violet-400",
 };
+
+/** Resolves a category to its edge color, falling back to a neutral edge. */
+function categorySpine(category: number): string {
+  return CATEGORY_SPINE_CLASS[category] ?? "border-l-transparent";
+}
 
 /**
- * Human-readable category names, mirroring the booru numbering.
+ * Localization key naming a booru category, for the row's tooltip.
  *
- * Deliberately not localized for the well-known four: these are the Danbooru
- * category names users already know, and the settings toggles carry the
- * translated long forms.
+ * The category is shown on hover rather than as a permanent label, so the tag name
+ * keeps the full row width. Unknown categories fall back to the generic custom-tag
+ * copy, which is what the CSV `-1` type means.
  */
-const CATEGORY_LABELS: Record<number, string> = {
-  0: "general",
-  1: "artist",
-  3: "copyright",
-  4: "character",
-  5: "meta",
-  7: "meta",
-  8: "meta",
+const CATEGORY_TOOLTIP_KEYS: Record<number, string> = {
+  0: "ui.ui.tagsuggestionpopup.categoryGeneral",
+  1: "ui.ui.tagsuggestionpopup.categoryArtist",
+  3: "ui.ui.tagsuggestionpopup.categoryCopyright",
+  4: "ui.ui.tagsuggestionpopup.categoryCharacter",
+  5: "ui.ui.tagsuggestionpopup.categoryMeta",
 };
 
-/** Resolves a category to its pill label, falling back to the generic custom-tag copy. */
-function categoryLabel(category: number, t: (key: string) => string): string {
-  return CATEGORY_LABELS[category] ?? t("ui.ui.tagsuggestionpopup.customTag");
+function categoryTooltip(category: number): string {
+  return CATEGORY_TOOLTIP_KEYS[category] ?? "ui.ui.tagsuggestionpopup.customTag";
 }
 
 /**
@@ -295,23 +297,23 @@ export function TagSuggestionPopup({
             }}
             onMouseEnter={() => onHover(index)}
             className={cn(
-              "flex w-full items-center gap-2 border-l-2 border-transparent px-3 py-1.5 text-left text-xs transition-colors",
+              "flex w-full items-center gap-2 border-l-2 px-3 py-1.5 text-left text-xs transition-colors",
+              categorySpine(match.tag.category),
               index === activeIndex ? "bg-[var(--accent)]" : "hover:bg-[var(--accent)]/60",
-              // The tag already written in the field is marked with an accent edge
-              // rather than a second pill, so the category pill below is always the
-              // only pill on the row and stays unambiguous.
-              isWritten && "border-l-[var(--marinara-chat-chrome-accent)]",
+              // The tag already written in the field gets a soft accent glow. A plain
+              // border was too easy to miss against the category spine on the same
+              // edge; the ring reads as a highlight without moving the row.
+              isWritten && "ring-1 ring-inset ring-[var(--marinara-chat-chrome-accent)]/60",
             )}
-            title={isWritten ? t("ui.ui.tagsuggestionpopup.alreadyWritten") : undefined}
+            title={isWritten ? t("ui.ui.tagsuggestionpopup.alreadyWritten") : t(categoryTooltip(match.tag.category))}
           >
-            <span className="truncate font-medium text-[var(--foreground)]">{displayTagName(match.tag.name)}</span>
             <span
               className={cn(
-                "mari-editor-chip shrink-0 px-1.5 py-px text-[0.5625rem] uppercase tracking-wide",
-                CATEGORY_CHIP_CLASS[match.tag.category] ?? "mari-editor-chip--accent",
+                "truncate font-medium",
+                isWritten ? "text-[var(--marinara-chat-chrome-accent)]" : "text-[var(--foreground)]",
               )}
             >
-              {categoryLabel(match.tag.category, t)}
+              {displayTagName(match.tag.name)}
             </span>
             {match.matchedAlias ? (
               <span className="shrink-0 truncate text-[0.625rem] text-[var(--muted-foreground)]">

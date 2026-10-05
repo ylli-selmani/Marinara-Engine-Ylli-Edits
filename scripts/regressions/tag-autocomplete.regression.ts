@@ -173,6 +173,47 @@ assert.deepEqual(
   "weight syntax after another tag resolves to the tag after the prefix",
 );
 
+// --- Closing weight marker ---------------------------------------------------
+// Weight syntax wraps the tag: `2::photorealistic::`. Both markers are syntax, so
+// only the text between them is the tag. Leaving the closing `::` in the query made
+// every tag in a double-colon prompt uncompletable, since `photorealistic::` matches
+// no tag in the vocabulary.
+assert.deepEqual(
+  getTagFragmentAtCaret("2::photorealistic::", 19),
+  { query: "photorealistic", start: 3, end: 19 },
+  "the closing weight marker is stripped from the query but stays inside the range",
+);
+
+// The range must still cover the closing marker, so completing keeps the wrapper
+// and does not leave a stray `::` behind the inserted tag.
+assert.equal(
+  applyTagCompletion("2::photorealistic::", getTagFragmentAtCaret("2::photorealistic::", 19)!, "photorealistic").value,
+  "2::photorealistic, ",
+  "completing a wrapped tag replaces the whole wrapper, not part of it",
+);
+
+assert.deepEqual(
+  getTagFragmentAtCaret("2::photorealistic", 17),
+  { query: "photorealistic", start: 3, end: 17 },
+  "an unclosed weight wrapper completes the tag inside it",
+);
+
+// A negative weight, a decimal weight, and a bare marker must all behave sensibly.
+assert.equal(getTagFragmentAtCaret("2::", 3), null, "a weight with no tag has nothing to complete");
+assert.equal(getTagFragmentAtCaret("-1::", 4), null, "a negative weight with no tag has nothing to complete");
+assert.deepEqual(
+  getTagFragmentAtCaret("-0.8::toon (style)", 18),
+  { query: "toon (style)", start: 6, end: 18 },
+  "a negative decimal weight resolves the parenthesized tag after it",
+);
+
+// A comma inside a weighted group starts a new tag, and that tag completes.
+assert.deepEqual(
+  getTagFragmentAtCaret("2::pornhwa, manhwa::", 20),
+  { query: "manhwa", start: 12, end: 20 },
+  "a tag mid-list inside a weight group is completable",
+);
+
 // A completion must not double up a separator that is already present.
 assert.equal(
   applyTagCompletion("long_ha, solo", { start: 0, end: 7 }, "long_hair").value,

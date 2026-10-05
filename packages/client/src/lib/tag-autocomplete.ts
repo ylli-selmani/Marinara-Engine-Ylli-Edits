@@ -331,13 +331,17 @@ export function matchTags(tags: readonly TagRecord[], query: string, limit = 50)
 }
 
 /**
- * Matches a weighted prompt segment like `1.1::toon` or `-1::2d`.
+ * Matches a weighted prompt segment like `1.1::toon`, `-1::2d`, or `2::toon::`.
  *
- * A1111/NovelAI weight syntax prefixes a value with `n::`, so the text after the
- * separator is the actual tag and the text before it is a number we must not
- * treat as tag content.
+ * Weight syntax wraps a value in `n::`, and the closing `::` is commonly written
+ * too. Both sides are syntax: only the text between them is the tag. Without
+ * stripping the closing marker, a prompt written as `2::photorealistic::` left the
+ * query as `photorealistic::`, which matches no tag — so every tag in a
+ * double-colon prompt was uncompletable.
  */
 const WEIGHT_PREFIX = /^([-+]?\d*\.?\d+)\s*::/;
+/** The closing `n::` of the same syntax, when the segment is written as `n::tag::`. */
+const WEIGHT_SUFFIX = /\s*::\s*$/;
 
 /**
  * Finds the tag fragment being typed at `caret`, plus the range to replace.
@@ -380,15 +384,18 @@ export function getTagFragmentAtCaret(
   // of the fragment ("masterpiece, 1.15::toon").
   const fragmentIndent = rawFragment.length - rawFragment.trimStart().length;
 
-  // Split any `1.1::` prefix off the front; the tag is what follows it.
+  // Split any `1.1::` prefix off the front; the tag is what follows it. The
+  // closing `::` is stripped from the tag text only — the replacement range still
+  // covers it, so completing `2::photorealistic::` keeps the weight wrapper.
   const weightMatch = rawFragment.slice(fragmentIndent).match(WEIGHT_PREFIX);
   const weightLength = weightMatch ? weightMatch[0].length : 0;
   const tagPart = rawFragment.slice(fragmentIndent + weightLength);
+  const tagText = tagPart.replace(WEIGHT_SUFFIX, "");
 
   // Keep a leading `*` in the query: it means "match anywhere" and is consumed by
   // `matchTags`. The range below already starts at the `*`, so completing replaces
   // it rather than leaving it in the prompt.
-  const query = normalizeTagQuery(tagPart);
+  const query = normalizeTagQuery(tagText);
   // A segment that is only a weight value ("-1::") has no tag to complete.
   if (!query.replace(/^\*/, "")) return null;
 
@@ -399,7 +406,7 @@ export function getTagFragmentAtCaret(
   // keeps offering `blonde hair`.
   if (!trailing && /,$/.test(before)) return null;
 
-  const leadingWhitespace = tagPart.length - tagPart.trimStart().length;
+  const leadingWhitespace = tagText.length - tagText.trimStart().length;
 
   return {
     query,
