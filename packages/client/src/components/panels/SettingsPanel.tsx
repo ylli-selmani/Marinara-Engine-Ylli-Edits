@@ -143,6 +143,7 @@ import {
   LifeBuoy,
   SlidersHorizontal,
   ToggleRight,
+  Tags,
 } from "lucide-react";
 import {
   useChat,
@@ -177,6 +178,7 @@ import { PromptOverridesEditor } from "./settings/PromptOverridesEditor";
 import { BackgroundPicker } from "./settings/BackgroundPicker";
 import { RequestTimeoutSettings } from "./settings/RequestTimeoutSettings";
 import { FEATURE_SWITCHES_CONTROL_ID, FeatureSwitchesSettings } from "./settings/FeatureSwitchesSettings";
+import { TAG_AUTOCOMPLETE_CONTROL_ID, TagAutocompleteSettings } from "./settings/TagAutocompleteSettings";
 import { CustomGenerationParametersSettings } from "./settings/CustomGenerationParametersSettings";
 import { ExternalExtensionsSettings, PersonalExtensionsSettings } from "./settings/PersonalExtensionsSettings";
 import { usePersonalExtensionPolicy, useSetExternalExtensionsEnabled } from "../../hooks/use-personal-extensions";
@@ -289,6 +291,7 @@ type SettingsSectionId =
   | "admin-access"
   | "multiplayer"
   | "features"
+  | "tag-autocomplete"
   | "updates"
   | "support-diagnostics"
   | "request-timeouts"
@@ -533,6 +536,13 @@ const SETTINGS_SECTIONS: readonly SettingsSectionMeta[] = [
     label: "Features",
     description: "Optional server behaviours, all off by default.",
     aliases: ["features", "switches", "optional", "provider retry", "lorebook groups"],
+  },
+  {
+    id: "tag-autocomplete",
+    tab: "advanced",
+    label: "Tag Autocomplete",
+    description: "Booru-style tag suggestions for image prompt fields, from a CSV you import.",
+    aliases: ["tags", "autocomplete", "booru", "danbooru", "csv", "prompt tags", "suggestions"],
   },
   {
     id: "updates",
@@ -8932,6 +8942,15 @@ function AdvancedSettings() {
         {...getSettingsSectionAnchorProps("features")}
       >
         <FeatureSwitchesSettings anchorId={getSettingsControlAnchorId(FEATURE_SWITCHES_CONTROL_ID)} />
+      </SettingsSection>
+
+      <SettingsSection
+        title={localizeUi("settings.sections.tagAutocomplete.title")}
+        description={localizeUi("settings.sections.tagAutocomplete.description")}
+        icon={<Tags size="0.875rem" />}
+        {...getSettingsSectionAnchorProps("tag-autocomplete")}
+      >
+        <TagAutocompleteSettings anchorId={getSettingsControlAnchorId(TAG_AUTOCOMPLETE_CONTROL_ID)} />
       </SettingsSection>
 
       <SettingsSection

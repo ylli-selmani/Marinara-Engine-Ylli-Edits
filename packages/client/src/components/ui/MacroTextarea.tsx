@@ -17,7 +17,9 @@ import { resolveSelfCardAssets } from "../../lib/card-asset-links";
 import { cn } from "../../lib/utils";
 import { formatEstimatedTokens } from "../../lib/character-token-count";
 import { handleTextareaTab } from "../../lib/textarea-editing";
+import { useTagAutocomplete } from "../../hooks/use-tag-autocomplete";
 import { DecisionStatementNote } from "./DecisionStatementNote";
+import { TagSuggestionPopup } from "./TagSuggestionPopup";
 import { Trans, useTranslation as useUiTranslation } from "react-i18next";
 
 type MacroDefinition = (typeof SUPPORTED_MACROS)[number];
@@ -339,6 +341,11 @@ export interface MacroTextareaProps {
   maxLength?: number;
   /** Optional ref to the underlying textarea (e.g. to insert emoji at the caret). */
   textareaRef?: Ref<HTMLTextAreaElement>;
+  /**
+   * Opt in to booru tag autocomplete. Only set this on image prompt/tag fields —
+   * it must never be enabled on roleplay prose, where booru tags are noise.
+   */
+  enableTagAutocomplete?: boolean;
 }
 
 export function MacroTextarea({
@@ -371,11 +378,17 @@ export function MacroTextarea({
   readOnly = false,
   maxLength,
   textareaRef,
+  enableTagAutocomplete = false,
 }: MacroTextareaProps) {
   const { t: localizeUi } = useUiTranslation();
   const [expanded, setExpanded] = useState(false);
   const [showMacroRef, setShowMacroRef] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const autocomplete = useTagAutocomplete({
+    onChange,
+    enabled: enableTagAutocomplete,
+    textareaRef,
+  });
 
   const handleExpandedClose = useCallback(() => {
     setExpanded(false);
@@ -389,12 +402,19 @@ export function MacroTextarea({
           ? formatOnChange(event.currentTarget, event.nativeEvent as InputEvent)
           : event.currentTarget.value,
       );
+      // The DOM value is already updated here, so the fragment can be read now.
+      requestAnimationFrame(autocomplete.refresh);
     },
-    [formatOnChange, onChange],
+    [autocomplete, formatOnChange, onChange],
   );
 
   const handleKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+      // Tag completion consumes navigation keys only while its popup is open.
+      autocomplete.onKeyDown(event);
+      if (event.defaultPrevented) {
+        return;
+      }
       onKeyDown?.(event);
       if (event.defaultPrevented || event.key !== "Tab") {
         return;
@@ -402,7 +422,7 @@ export function MacroTextarea({
 
       handleTextareaTab(event);
     },
-    [onKeyDown],
+    [autocomplete, onKeyDown],
   );
 
   const affordanceButtonClassName = cn(
@@ -528,6 +548,16 @@ export function MacroTextarea({
         formatOnChange={formatOnChange}
       />
       <MacrosReferenceModal open={showMacroRef} onClose={() => setShowMacroRef(false)} />
+      {autocomplete.matches.length > 0 && autocomplete.anchor !== null ? (
+        <TagSuggestionPopup
+          matches={autocomplete.matches}
+          activeIndex={autocomplete.activeIndex}
+          textareaRef={textareaRef}
+          caret={autocomplete.anchor}
+          onSelect={autocomplete.handleSelect}
+          onHover={autocomplete.setActiveIndex}
+        />
+      ) : null}
     </>
   );
 }

@@ -2751,6 +2751,7 @@ export function AgentEditor() {
                     placeholder={localizeUi("ui.agents.agenteditor.masterpieceBestQualityDetailedLighting")}
                     rows={3}
                     title={localizeUi("ui.agents.agenteditor.positivePromptTags")}
+                    enableTagAutocomplete
                     className="min-h-[5rem] resize-y rounded-xl border border-[var(--border)] bg-[var(--secondary)] px-3 py-2 text-xs text-[var(--foreground)] outline-none transition-colors placeholder:text-[var(--muted-foreground)]/45 focus:border-[var(--primary)]/50"
                   />
                 </div>
@@ -2767,6 +2768,7 @@ export function AgentEditor() {
                     placeholder={localizeUi("ui.agents.agenteditor.lowresBadAnatomyTextArtifacts")}
                     rows={3}
                     title={localizeUi("ui.agents.agenteditor.negativePrompt")}
+                    enableTagAutocomplete
                     className="min-h-[5rem] resize-y rounded-xl border border-[var(--border)] bg-[var(--secondary)] px-3 py-2 text-xs text-[var(--foreground)] outline-none transition-colors placeholder:text-[var(--muted-foreground)]/45 focus:border-[var(--primary)]/50"
                   />
                 </div>
