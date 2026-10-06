@@ -104,6 +104,9 @@ export function TagSuggestionPopup({
 }: TagSuggestionPopupProps) {
   const popupRef = useRef<HTMLDivElement>(null);
   const { t } = useTranslation();
+  // Drives remeasurement when the list grows or shrinks, which changes the popup's
+  // natural height even though the row markup is otherwise identical.
+  const matchCount = matches.length;
   const [position, setPosition] = useState<{
     top: number;
     left: number;
@@ -160,10 +163,18 @@ export function TagSuggestionPopup({
 
     const update = () => {
       const rect = textarea.getBoundingClientRect();
-      // The popup is measured once it exists. `offsetWidth`/`offsetHeight` reflect
-      // border-box, so the clamp uses the same geometry the browser lays out.
-      const popupHeight = popupRef.current?.offsetHeight || POPUP_FALLBACK_HEIGHT;
-      const popupWidth = popupRef.current?.offsetWidth || POPUP_WIDTH;
+      const node = popupRef.current;
+      // The popup's own laid-out height must never be the input to its own cap, or
+      // it can never grow: a one-row popup measures ~40px, caps itself at 40px, and
+      // stays scrollable no matter how many matches arrive. `offsetHeight` reports
+      // the *constrained* box, so it is only a valid measurement when nothing has
+      // constrained it yet. `scrollHeight` is the natural content height and is
+      // what the fit should be computed against.
+      const naturalHeight = node
+        ? Math.max(node.scrollHeight, Math.min(node.offsetHeight || 0, POPUP_MAX_HEIGHT))
+        : POPUP_FALLBACK_HEIGHT;
+      const popupHeight = Math.min(naturalHeight || POPUP_FALLBACK_HEIGHT, POPUP_MAX_HEIGHT);
+      const popupWidth = node?.offsetWidth || POPUP_WIDTH;
       const bounds = clippingRectOf(textarea);
 
       // The placement is pure arithmetic over rectangles, so it lives in the lib
@@ -202,9 +213,11 @@ export function TagSuggestionPopup({
 
     update();
 
-    // The first pass measures a popup that may not be laid out yet, so it falls
-    // back to the constant width. Re-running after paint clamps against the real
-    // box, which is what keeps the list from running past the right edge.
+    // Two passes, because the row list changes height after React commits it. The
+    // first pass runs against the rows currently in the DOM; the frame callback then
+    // measures the popup with the *new* rows so the granted height matches what will
+    // actually be drawn. Without the second pass the popup kept the previous list's
+    // height and simply scrolled.
     const remeasure = requestAnimationFrame(update);
 
     window.addEventListener("scroll", update, true);
@@ -214,7 +227,10 @@ export function TagSuggestionPopup({
       window.removeEventListener("scroll", update, true);
       window.removeEventListener("resize", update);
     };
-  }, [caret, matches, textareaRef]);
+    // `matches.length` is a dependency on purpose: regenerating an equal-length list
+    // does not change the popup's box, but growing from one row to twenty does, and
+    // the array identity alone does not tell us which happened.
+  }, [caret, matches, matchCount, textareaRef]);
 
   // Keep the highlighted row visible while arrowing through a long list.
   useEffect(() => {

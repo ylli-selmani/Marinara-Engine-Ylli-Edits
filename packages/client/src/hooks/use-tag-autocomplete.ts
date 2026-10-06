@@ -10,6 +10,7 @@ import {
 } from "react";
 
 import { applyTagCompletion, getTagFragmentAtCaret, matchTags, type TagMatch } from "../lib/tag-autocomplete";
+import { isDismissalStillActive, type DismissalPoint } from "../lib/tag-autocomplete-dismissal";
 import { useTagAutocompleteStore } from "../stores/tag-autocomplete.store";
 
 /**
@@ -130,15 +131,23 @@ export function useTagAutocomplete({
     rangeRef.current = null;
   }, []);
 
-  // After an explicit dismissal, stay closed until the user actually edits the
-  // text again. Without this, the selectionchange listener immediately reopens
-  // the list the user just clicked away from.
-  const suppressedRef = useRef(false);
+  // After an explicit dismissal, stay closed until the user shows intent again.
+  // Without this, the selectionchange listener immediately reopens the list the
+  // user just clicked away from.
+  //
+  // The suppression records *where* it was dismissed rather than just that it
+  // happened. Clearing it only on a text edit meant that clicking back into a
+  // different tag — or anywhere else in the field — could not reopen the list, so
+  // the popup looked dead until the user typed something. Comparing the caret and
+  // value lets a real move reopen it while a re-fired selection change at the same
+  // spot stays dismissed.
+  const suppressedAtRef = useRef<DismissalPoint | null>(null);
 
   const dismiss = useCallback(() => {
-    suppressedRef.current = true;
+    const textarea = getTextarea();
+    suppressedAtRef.current = { value: textarea?.value ?? "", caret: textarea?.selectionStart ?? -1 };
     close();
-  }, [close]);
+  }, [close, getTextarea]);
 
   const refresh = useCallback(() => {
     const textarea = getTextarea();
@@ -153,7 +162,12 @@ export function useTagAutocomplete({
       return;
     }
 
-    if (suppressedRef.current) return;
+    // Still dismissed only if nothing moved since. Any caret or text change is the
+    // user asking to see suggestions again.
+    if (isDismissalStillActive(suppressedAtRef.current, { value: textarea.value, caret: textarea.selectionStart })) {
+      return;
+    }
+    suppressedAtRef.current = null;
 
     rangeRef.current = { start: fragment.start, end: fragment.end };
     setQuery(fragment.query);
@@ -236,8 +250,9 @@ export function useTagAutocomplete({
       // case publishes here.
       if (!onChangeEvent) onChange(event.target.value);
       onChangeEvent?.(event);
-      // An edit is an explicit intent to see suggestions again.
-      suppressedRef.current = false;
+      // An edit is an explicit intent to see suggestions again, regardless of where
+      // the caret was when the list was dismissed.
+      suppressedAtRef.current = null;
       // The DOM value is already updated here, so the fragment can be read now.
       requestAnimationFrame(refresh);
     },
