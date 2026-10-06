@@ -1,46 +1,43 @@
 import { useEffect, useLayoutEffect, useRef, useState, type Ref } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { BookOpen, Palette, Star, User } from "lucide-react";
 
 import type { TagMatch } from "../../lib/tag-autocomplete";
 import { displayTagName, normalizeTagKey } from "../../lib/tag-autocomplete";
+import { caretLineTopOf, placePopup } from "../../lib/tag-popup-placement";
 import type { UseTagAutocompleteResult } from "../../hooks/use-tag-autocomplete";
 import { cn } from "../../lib/utils";
 
 /**
- * Category spine colors, keyed by the CSV `type` column.
+ * Category icons, keyed by the CSV `type` column (Danbooru numbering).
  *
- * The category is carried by a thin colored edge on the row rather than a labeled
- * pill: a pill sat in the middle of the row and stole width from the tag name and
- * its alias, truncating exactly the text the user needs to read. An edge costs no
- * horizontal space, so names and aliases get the full width back, and the category
- * name is available on hover. The hues stay literal palette values rather than
- * theme tokens because they encode the booru category, and users coming from a1111
- * tagcomplete read them as meaning (artist = rose, copyright = amber, and so on).
+ * Distinguished by icon rather than hue, following the engine's own conventions:
+ * `AgentsPanel` separates its categories with a distinct icon per section and has
+ * no color field at all, `LorebooksPanel`'s `CATEGORY_COLORS` maps six categories
+ * to one identical value, and `globals.css` reserves the named palettes for data
+ * visualization rather than component chrome. An icon also survives a theme change
+ * and reads on touch, where the hover that would explain a color does not exist
+ * (DESIGN.md, "The No Tiny Mystery Rule").
+ *
+ * Sizes match `AgentsPanel`'s section icons, which are the closest precedent.
  */
-const CATEGORY_SPINE_CLASS: Record<number, string> = {
-  0: "border-l-[var(--marinara-chat-chrome-accent)]",
-  1: "border-l-rose-400",
-  3: "border-l-amber-400",
-  4: "border-l-emerald-400",
-  5: "border-l-sky-400",
-  7: "border-l-violet-400",
-  8: "border-l-violet-400",
+const CATEGORY_ICONS: Record<number, typeof User> = {
+  1: Palette, // artist
+  3: BookOpen, // copyright / series
+  4: User, // character
+  5: Star, // meta
+  7: Star,
+  8: Star,
 };
 
-/** Resolves a category to its edge color, falling back to a neutral edge. */
-function categorySpine(category: number): string {
-  return CATEGORY_SPINE_CLASS[category] ?? "border-l-transparent";
-}
-
 /**
- * Localization key naming a booru category, for the row's tooltip.
+ * Localization key naming a category, used as the icon's accessible label.
  *
- * The category is shown on hover rather than as a permanent label, so the tag name
- * keeps the full row width. Unknown categories fall back to the generic custom-tag
- * copy, which is what the CSV `-1` type means.
+ * These are the short forms for a list row; the settings toggles carry the longer
+ * translated wording.
  */
-const CATEGORY_TOOLTIP_KEYS: Record<number, string> = {
+const CATEGORY_LABEL_KEYS: Record<number, string> = {
   0: "ui.ui.tagsuggestionpopup.categoryGeneral",
   1: "ui.ui.tagsuggestionpopup.categoryArtist",
   3: "ui.ui.tagsuggestionpopup.categoryCopyright",
@@ -48,8 +45,14 @@ const CATEGORY_TOOLTIP_KEYS: Record<number, string> = {
   5: "ui.ui.tagsuggestionpopup.categoryMeta",
 };
 
-function categoryTooltip(category: number): string {
-  return CATEGORY_TOOLTIP_KEYS[category] ?? "ui.ui.tagsuggestionpopup.customTag";
+/** Resolves a category's icon, or null for the general/unknown categories. */
+function categoryIcon(category: number) {
+  return CATEGORY_ICONS[category] ?? null;
+}
+
+/** Resolves a category's accessible label, falling back to the generic copy. */
+function categoryLabelKey(category: number): string {
+  return CATEGORY_LABEL_KEYS[category] ?? "ui.ui.tagsuggestionpopup.customTag";
 }
 
 /**
@@ -85,8 +88,6 @@ const POPUP_WIDTH = 320;
 /** Vertical space assumed before the popup has been measured. */
 const POPUP_FALLBACK_HEIGHT = 240;
 
-/** Smallest popup height worth showing; below this the list is unusable. */
-const POPUP_MIN_HEIGHT = 96;
 /** Tallest the popup grows; beyond this the list scrolls. */
 const POPUP_MAX_HEIGHT = 240;
 
@@ -164,32 +165,23 @@ export function TagSuggestionPopup({
       const popupWidth = popupRef.current?.offsetWidth || POPUP_WIDTH;
       const bounds = clippingRectOf(textarea);
 
-      // Anchor below the whole field rather than below the caret's line. Caret
-      // anchoring covers the text being edited whenever the field is more than a
-      // line or two tall, because the popup starts on the caret's row and grows
-      // down over the rest of the text.
-      const gap = 4;
-      const anchorTop = rect.bottom;
-      const spaceBelow = bounds.bottom - anchorTop;
-      const spaceAbove = rect.top - bounds.top;
+      // The placement is pure arithmetic over rectangles, so it lives in the lib
+      // where the regression suite can exercise it without a DOM.
+      const caretLineTop = caretLineTopOf({
+        caret,
+        value: textarea.value,
+        scrollTop: textarea.scrollTop,
+        rect,
+        bounds,
+        style: window.getComputedStyle(textarea),
+      });
 
-      // Flipping above is only safe when the popup genuinely fits there. Testing
-      // `spaceAbove > spaceBelow` alone is not enough: a tall field (MacroTextarea's
-      // expanded editor is ~780px) leaves almost no room above it, so the flip fired
-      // and was then clamped straight back down over the field — reintroducing the
-      // overlap this anchoring exists to prevent.
-      const openUpward = spaceBelow < popupHeight && spaceAbove >= popupHeight + gap;
-
-      // Whatever room the chosen side actually has. The popup is capped to it rather
-      // than clamped, so a short container scrolls the list instead of pushing it
-      // back across the field.
-      const room = Math.max((openUpward ? spaceAbove : spaceBelow) - gap, POPUP_MIN_HEIGHT);
-      const availableHeight = Math.min(popupHeight, room);
-
-      const rawTop = openUpward ? rect.top - availableHeight - gap : anchorTop + gap;
-      // Clamp into the visible band so a short container still shows the list.
-      const maxTop = Math.max(bounds.top + gap, bounds.bottom - availableHeight - gap);
-      const top = Math.min(Math.max(rawTop, bounds.top + gap), maxTop);
+      const { top, availableHeight } = placePopup({
+        bounds,
+        rect,
+        caretLineTop,
+        popupHeight,
+      });
 
       // Align to the field's own left edge so the list reads as belonging to it.
       // The caret's horizontal position is deliberately not used: the popup hangs
@@ -283,6 +275,8 @@ export function TagSuggestionPopup({
         // (medium)`, and that is the tag they should be told exists.
         const isWritten = Boolean(writtenTag) && comparableTagName(match.tag.name) === comparableTagName(writtenTag);
 
+        const CategoryIcon = categoryIcon(match.tag.category);
+
         return (
           <button
             key={match.tag.name}
@@ -297,16 +291,24 @@ export function TagSuggestionPopup({
             }}
             onMouseEnter={() => onHover(index)}
             className={cn(
+              // The accent left edge and hover tint follow the policy: accent for
+              // interaction chrome, no per-category hue.
               "flex w-full items-center gap-2 border-l-2 px-3 py-1.5 text-left text-xs transition-colors",
-              categorySpine(match.tag.category),
-              index === activeIndex ? "bg-[var(--accent)]" : "hover:bg-[var(--accent)]/60",
-              // The tag already written in the field gets a soft accent glow. A plain
-              // border was too easy to miss against the category spine on the same
-              // edge; the ring reads as a highlight without moving the row.
+              index === activeIndex
+                ? "border-l-[var(--marinara-chat-chrome-accent)] bg-[var(--accent)]"
+                : "border-l-transparent hover:bg-[var(--accent)]/60",
+              // The tag already written in the field gets a soft accent glow and an
+              // accent name, so it is findable at a glance while typing.
               isWritten && "ring-1 ring-inset ring-[var(--marinara-chat-chrome-accent)]/60",
             )}
-            title={isWritten ? t("ui.ui.tagsuggestionpopup.alreadyWritten") : t(categoryTooltip(match.tag.category))}
           >
+            {CategoryIcon ? (
+              <CategoryIcon
+                size="0.8125rem"
+                aria-label={t(categoryLabelKey(match.tag.category))}
+                className="shrink-0 text-[var(--muted-foreground)]"
+              />
+            ) : null}
             <span
               className={cn(
                 "truncate font-medium",

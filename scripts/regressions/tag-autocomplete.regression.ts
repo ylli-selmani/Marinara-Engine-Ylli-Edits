@@ -214,6 +214,40 @@ assert.deepEqual(
   "a tag mid-list inside a weight group is completable",
 );
 
+// Every weight spelling people actually write must parse. A weight that fails to
+// parse silently becomes part of the tag name, leaving the tag uncompletable with
+// no visible reason why — which is exactly how `2.::photorealistic::` broke.
+{
+  const weightForms: Array<[string, string, number]> = [
+    ["2::photorealistic::", "integer with closing marker", 3],
+    ["2.::photorealistic::", "trailing-dot weight", 4],
+    ["2.5::photorealistic::", "decimal weight", 5],
+    [".5::photorealistic::", "bare-dot weight", 4],
+    ["-1::photorealistic::", "negative weight", 4],
+    ["+1::photorealistic::", "explicitly positive weight", 4],
+  ];
+
+  for (const [text, label, expectedStart] of weightForms) {
+    const fragment = getTagFragmentAtCaret(text, text.length);
+    assert.ok(fragment, `${label} must be completable`);
+    assert.equal(fragment.query, "photorealistic", `${label} resolves to the tag`);
+    assert.equal(fragment.start, expectedStart, `${label} starts the range at the tag, not inside the weight`);
+  }
+
+  // The range must cover the closing marker, so completing keeps the wrapper.
+  assert.equal(
+    applyTagCompletion("2.::photorealistic::", getTagFragmentAtCaret("2.::photorealistic::", 20)!, "photorealistic")
+      .value,
+    "2.::photorealistic, ",
+    "completing replaces the whole wrapper, leaving no stray marker",
+  );
+
+  // Weights with no tag inside them have nothing to complete.
+  for (const text of ["2::", "2.::", "-1::", ".5::"]) {
+    assert.equal(getTagFragmentAtCaret(text, text.length), null, `${JSON.stringify(text)} has no tag to complete`);
+  }
+}
+
 // A completion must not double up a separator that is already present.
 assert.equal(
   applyTagCompletion("long_ha, solo", { start: 0, end: 7 }, "long_hair").value,

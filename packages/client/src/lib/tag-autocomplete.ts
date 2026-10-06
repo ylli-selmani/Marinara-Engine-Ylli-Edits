@@ -338,8 +338,12 @@ export function matchTags(tags: readonly TagRecord[], query: string, limit = 50)
  * stripping the closing marker, a prompt written as `2::photorealistic::` left the
  * query as `photorealistic::`, which matches no tag — so every tag in a
  * double-colon prompt was uncompletable.
+ *
+ * The value accepts a trailing dot (`2.::tag`) and a bare dot (`.5::tag`), because
+ * hand-written prompts contain both and a weight that fails to parse silently
+ * becomes part of the tag name, leaving the tag uncompletable.
  */
-const WEIGHT_PREFIX = /^([-+]?\d*\.?\d+)\s*::/;
+const WEIGHT_PREFIX = /^([-+]?(?:\d+(?:\.\d*)?|\.\d+))\s*::/;
 /** The closing `n::` of the same syntax, when the segment is written as `n::tag::`. */
 const WEIGHT_SUFFIX = /\s*::\s*$/;
 
