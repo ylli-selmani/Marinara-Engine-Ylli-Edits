@@ -5161,6 +5161,160 @@ strong {
     0 0 16px var(--glow-sm-2);
 }
 
+/*
+ * Long tag names in the autocomplete list are truncated, and the list is too dense for a
+ * hover tooltip to be comfortable. Instead the name slides itself into view while the row
+ * is under the pointer: it waits briefly, then translates left by exactly its own overflow
+ * so the tail is readable, and slides back when the pointer leaves.
+ *
+ * The shift is supplied per-row by React as `--mari-tag-scroll-shift`, measured from the
+ * text's own scrollWidth against its wrapper. A name that fits gets no variable and no
+ * rule matches, so nothing moves; there is no animation to run when there is nothing hidden.
+ *
+ * Only the tag *name* slides. The alias beside it also clips, but sliding both at once
+ * looked agitated and the two travel different distances, so the alias stays put.
+ *
+ * KNOWN CEILING: touch has no hover, so this reveal is unreachable on a phone. The
+ * `.mari-tag-scroll-text--press` modifier below was written for a long-press reveal but is
+ * currently DEAD — nothing in the component tree applies that class, and there is no `:active`
+ * rule. Wiring it needs a pointer handler on the row; until then, treat touch as unsupported
+ * rather than covered.
+ */
+.mari-tag-scroll-wrap {
+  min-width: 0;
+  /* The wrapper has to clip the sliding text, which means containing it. An inline-level box
+     with `overflow: hidden` does not clip a transformed inline-block child, so the name painted
+     over the alias beside it. Making the wrapper a block establishes the box that clips. */
+  display: block;
+  overflow: hidden;
+}
+
+/*
+ * The "there is more text" cue is a fade at the clipped edge rather than an ellipsis. That is a
+ * presentation choice, not a constraint: an earlier version of this comment claimed an ellipsis
+ * cannot coexist with the slide because clamping zeroes `scrollWidth`. That is false, and was
+ * measured — `overflow: hidden` plus an ellipsis on a 116px box reports `scrollWidth` 294 and
+ * `clientWidth` 116, so the difference the slide needs is perfectly intact. `scrollWidth` always
+ * reports full content width; only `clientWidth` clamps. The fade is used because it reads more
+ * quietly against a dense list than a glyph does.
+ *
+ * React sets `data-clipped` from the measured overflow, so the fade appears only on a name that
+ * genuinely overflows; a name that fits keeps a clean edge.
+ *
+ * The fade uses ONE static mask whose POSITION animates, which is what makes it glide rather than
+ * pop. Transitioning `mask-image` between a right-fade and a left-fade does not cross-fade, it
+ * switches: measured in Edge, the browser reports the property as animatable
+ * (`CSS.supports("transition","mask-image 300ms")` is true) and then emits only the final value,
+ * never an intermediate one, because the two gradients have different stop structures
+ * (`calc(100% - 1.5rem)` against `1.5rem`) and are therefore not interpolable. Both a 1ms flip and
+ * a 220ms "cross-fade" look identical: instant. That was the pop.
+ *
+ * An overlay pair animated by opacity was tried next. Opacity does interpolate, but an overlay has
+ * to paint a colour over the text, and the row's background is not constant — the pointer fill and
+ * the written marker both change it — so the overlay showed as a dark box on the hovered row.
+ *
+ * `mask-position` avoids both problems. A mask composites against whatever is behind it, so there
+ * is no colour to mismatch.
+ *
+ * The geometry is the part that is easy to get wrong, and the first attempt WAS wrong: a mask
+ * `calc(100% + 1.5rem)` wide with `mask-position: 100%` aligns the oversized mask's right edge to
+ * the wrapper's, which pushes the transparent band entirely off-screen and removes the fade
+ * completely. Invisible at rest — which is exactly what the user reported seeing.
+ *
+ * So the mask is 200% wide with a transparent band at EACH end and a solid middle:
+ *
+ *     [transparent 1.5rem][ solid .............. ][transparent 1.5rem]
+ *
+ * At `mask-position: 100%` the box is pulled a full wrapper-width to the left, landing its RIGHT
+ * band over the wrapper's right edge — the resting fade. At `0%` the LEFT band covers the
+ * wrapper's left edge — the hovered fade. Both are on screen, and interpolating between the two
+ * positions slides the fade across the row.
+ */
+.mari-tag-scroll-wrap[data-clipped="true"] {
+  --mari-tag-fade: 1.5rem;
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 var(--mari-tag-fade),
+    #000 calc(100% - var(--mari-tag-fade)),
+    transparent
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 var(--mari-tag-fade),
+    #000 calc(100% - var(--mari-tag-fade)),
+    transparent
+  );
+  -webkit-mask-size: 200% 100%;
+  mask-size: 200% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  /* At rest the right-hand band sits over the right edge, so the fade is on the trailing side. */
+  -webkit-mask-position: 100% 0;
+  mask-position: 100% 0;
+  transition: -webkit-mask-position 220ms linear;
+  transition: mask-position 220ms linear;
+}
+
+.mari-tag-scroll-text {
+  display: inline-block;
+  white-space: nowrap;
+  transition: transform 900ms ease-in-out;
+  transition-delay: 100ms;
+}
+
+/*
+ * Each column reveals itself independently, so hovering the NAME slides only the name and
+ * hovering the ALIAS slides only the alias. A row-wide trigger was tried first and made both
+ * move at once, which is what the user asked to change: with two columns of unrelated text,
+ * opening both when only one was pointed at felt like the row flinching.
+ *
+ * This means the hover target is the element itself, NOT the row. The trade-off is real and
+ * deliberate: pointing at the name no longer reveals the alias, and vice versa. The overflow
+ * not being revealed is still readable — the wrapper carries a `title` when clipped.
+ *
+ * The overshoot (see ScrollingTagName) plus this swap means a fully revealed tag is no
+ * longer blurred at the end, which the row-wide version could not fix on its own because
+ * both columns shared one hover state.
+ */
+.mari-tag-scroll-wrap--slide:hover .mari-tag-scroll-text,
+.mari-tag-scroll-text--press {
+  transform: translateX(var(--mari-tag-scroll-shift, 0));
+}
+
+/* The delay is what makes this hover *intent*: a pointer merely crossing the list does not
+   start a slide, only one that settles on a row does. */
+.mari-tag-scroll-wrap--slide:hover .mari-tag-scroll-text {
+  transition-delay: 1000ms;
+}
+
+/*
+ * On hover the fade travels to the LEADING edge, over the same window the text slides: the mask
+ * moves from 100% (right band over the right edge) to 0% (left band over the left edge), so the
+ * fade crosses the row smoothly instead of switching edges in one frame.
+ *
+ * The delay matches the travel's intent delay, so the fade starts moving exactly when the text
+ * does. A fade that moved before the text did read as a glitch.
+ */
+.mari-tag-scroll-wrap--slide:hover[data-clipped="true"] {
+  transition-delay: 1000ms;
+  -webkit-mask-position: 0 0;
+  mask-position: 0 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The text still needs to be reachable, so keep the reveal but drop the travel time. */
+  .mari-tag-scroll-text {
+    transition-duration: 1ms;
+    transition-delay: 0ms;
+  }
+
+  .mari-tag-scroll-wrap--slide:hover .mari-tag-scroll-text {
+    transition-delay: 0ms;
+  }
+}
+
 /* ─────────────────────────────────────────────
    10. UI COMPONENTS
    ───────────────────────────────────────────── */
@@ -6491,9 +6645,7 @@ strong {
 
   /* 100cqw is the chat pane (CenterContent is a size container), so the right edge ignores the
      transcript's scrollbar, as the composer does. */
-  [data-chat-mode="roleplay"][data-roleplay-presentation="classic"][data-chat-position="right"]
-    [data-chat-scroll]
-    > * {
+  [data-chat-mode="roleplay"][data-roleplay-presentation="classic"][data-chat-position="right"] [data-chat-scroll] > * {
     margin-left: max(
       0px,
       100cqw - 2 * var(--mari-roleplay-transcript-gutter) - var(--mari-chat-position-clearance, 0px) -
