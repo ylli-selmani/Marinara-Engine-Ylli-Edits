@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type Ref } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { BookOpen, Palette, Star, User } from "lucide-react";
+import { BookOpen, Palette, Tag, User, Wrench } from "lucide-react";
 
 import type { TagMatch } from "../../lib/tag-autocomplete";
 import { displayTagName, normalizeTagKey } from "../../lib/tag-autocomplete";
@@ -23,12 +23,13 @@ import { cn } from "../../lib/utils";
  * Sizes match `AgentsPanel`'s section icons, which are the closest precedent.
  */
 const CATEGORY_ICONS: Record<number, typeof User> = {
+  0: Tag, // general
   1: Palette, // artist
   3: BookOpen, // copyright / series
   4: User, // character
-  5: Star, // meta
-  7: Star,
-  8: Star,
+  5: Wrench, // meta
+  7: Wrench,
+  8: Wrench,
 };
 
 /**
@@ -255,7 +256,9 @@ export function TagSuggestionPopup({
       ref={popupRef}
       role="listbox"
       aria-label={t("ui.ui.tagsuggestionpopup.tagSuggestions")}
-      className="glass-strong fixed z-[9999] max-h-60 w-80 overflow-y-auto rounded-xl py-1 text-xs text-[var(--popover-foreground)]"
+      // `p-1` keeps the rows off the container's rounded edge, so a row's rounded
+      // outline is not clipped by the container's own corner curves.
+      className="glass-strong fixed z-[9999] max-h-60 w-80 overflow-y-auto rounded-xl p-1 text-xs text-[var(--popover-foreground)]"
       style={{
         top: position.top,
         left: position.left,
@@ -291,25 +294,49 @@ export function TagSuggestionPopup({
             }}
             onMouseEnter={() => onHover(index)}
             className={cn(
-              // The accent left edge and hover tint follow the policy: accent for
-              // interaction chrome, no per-category hue.
+              // The accent carries every piece of interaction chrome on a row: the
+              // keyboard/hover pointer, the written marker, and the focus edge.
               "flex w-full items-center gap-2 border-l-2 px-3 py-1.5 text-left text-xs transition-colors",
               index === activeIndex
-                ? "border-l-[var(--marinara-chat-chrome-accent)] bg-[var(--accent)]"
-                : "border-l-transparent hover:bg-[var(--accent)]/60",
-              // The tag already written in the field gets a soft accent glow and an
-              // accent name, so it is findable at a glance while typing.
-              isWritten && "ring-1 ring-inset ring-[var(--marinara-chat-chrome-accent)]/60",
+                ? "border-l-[var(--marinara-chat-chrome-accent)] bg-[var(--marinara-chat-chrome-accent)]/15"
+                : "border-l-transparent hover:bg-[var(--muted)]/50",
+              // The tag already written in the field is marked the way the engine marks
+              // a focused field: a border in the accent rather than the resting
+              // `--border` tint. See `CharacterEditor`'s textareas, which go from
+              // `border-[var(--border)]` to `focus:border-[var(--primary)]`.
+              //
+              // Drawn as an outline rather than a `border`, because a border sits on
+              // the row's edge where the container's rounded corners and
+              // `overflow-hidden` clip it — which ate the curve on the first and last
+              // rows and every curve on a single-row list. An outline is not part of
+              // the row's border box, so it renders whole.
+              //
+              // The short inset glow is what makes the row read as marked rather than
+              // merely outlined; on its own it is too vague to define a shape.
+              isWritten &&
+                "rounded-lg outline outline-1 -outline-offset-2 outline-[var(--marinara-chat-chrome-accent)] shadow-[inset_0_0_10px_-2px_var(--marinara-chat-chrome-accent)]",
+              isWritten && index === activeIndex && "border-l-[var(--marinara-chat-chrome-accent)]",
             )}
+            // The row itself carries no title: the icon already names the category and
+            // the visible text is the tag. Each truncating span below titles itself,
+            // so a hover reveals exactly the text that was cut off rather than a
+            // restatement of the row.
           >
             {CategoryIcon ? (
               <CategoryIcon
-                size="0.8125rem"
+                // Slightly above the label size. At 0.75rem the more detailed
+                // glyphs lost their shape and read as a blob, which is why the
+                // general category uses the simple tag outline.
+                size="0.875rem"
                 aria-label={t(categoryLabelKey(match.tag.category))}
                 className="shrink-0 text-[var(--muted-foreground)]"
               />
             ) : null}
             <span
+              // A long tag name is the common case in a 320px popup, and the list is
+              // too dense for a marquee. Hovering reveals the full name, which is
+              // enough to confirm before inserting it.
+              title={displayTagName(match.tag.name)}
               className={cn(
                 "truncate font-medium",
                 isWritten ? "text-[var(--marinara-chat-chrome-accent)]" : "text-[var(--foreground)]",
@@ -318,7 +345,10 @@ export function TagSuggestionPopup({
               {displayTagName(match.tag.name)}
             </span>
             {match.matchedAlias ? (
-              <span className="shrink-0 truncate text-[0.625rem] text-[var(--muted-foreground)]">
+              <span
+                title={displayTagName(match.matchedAlias)}
+                className="shrink-0 truncate text-[0.625rem] text-[var(--muted-foreground)]"
+              >
                 {displayTagName(match.matchedAlias)} →
               </span>
             ) : null}
