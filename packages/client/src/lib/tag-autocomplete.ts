@@ -7,6 +7,7 @@
  */
 import {
   displayTagName,
+  normalizeTagKey,
   normalizeTagQuery,
   type TagRecord,
   // Re-exported so callers have one import site for vocabulary work.
@@ -263,6 +264,74 @@ export function getOrBuildIndex(tags: readonly TagRecord[]): TagIndex {
 }
 
 /**
+ * Normalizes a tag name for comparisons that should ignore punctuation.
+ *
+ * Punctuation and spacing are dropped on both sides, so `watercolor pencil medium`,
+ * `watercolor_(medium)` and `watercolor-pencil-medium` all collapse to one key. This
+ * is deliberately lossy: it is used to decide whether an *alias* is worth showing
+ * beside a name, where treating `blondehair` as a restatement of `blonde_hair` is the
+ * desired outcome.
+ *
+ * Because it is lossy it must NOT be used for identity claims about what the user
+ * typed — see `sameTagName`.
+ */
+export function comparableTagName(name: string): string {
+  return normalizeTagKey(name)
+    .replace(/[^a-z0-9]+/g, "")
+    .trim();
+}
+
+/**
+ * Whether two tag names are the same tag, for asserting "you already wrote this".
+ *
+ * Stricter than `comparableTagName`, which is lossy enough to conflate genuinely
+ * different tags: it maps `bluesky` onto `blue_sky`, `blood` onto `blood+` and
+ * `witch` onto `w.i.t.c.h.`, all pairs of distinct real tags. Marking one of those as
+ * already written would tell the user their text is something it is not.
+ *
+ * Only *separators* are treated as interchangeable: underscores, hyphens, spaces and
+ * case, since a tag typed by hand legitimately differs there — `watercolor pencil
+ * medium` should be recognized as `watercolor_(medium)`. Every other character is
+ * content and must match, which is what keeps `blood+` distinct from `blood`.
+ */
+export function sameTagName(a: string, b: string): boolean {
+  return wordsOf(a) === wordsOf(b);
+}
+
+/**
+ * The words of a tag: separators folded to single spaces, other punctuation kept.
+ *
+ * Brackets are the nuanced case, and there are two different things a person does by hand:
+ *
+ * 1. They leave the parentheses off a trailing qualifier: `watercolor pencil medium` for
+ *    `watercolor_pencil_(medium)`. Here the *word* must survive while the brackets go, so
+ *    both sides fold to `watercolor pencil medium`.
+ * 2. They type a tag whose whole identity is the bracket: `(cosplay)`, `[artist]_name`.
+ *    Here the bracket is content, and dropping it would collapse `(cosplay)` onto
+ *    `cosplay` — the same class of false positive `comparableTagName` makes with
+ *    `blood`/`blood+`.
+ *
+ * The rule that separates them: brackets that open the name are content; brackets later in
+ * the name are qualifier wrappers. `(a)` therefore stays distinct from `a`, while
+ * `watercolor_pencil_(medium)` still matches `watercolor pencil medium`.
+ */
+function wordsOf(name: string): string {
+  const folded = name
+    .toLowerCase()
+    .replace(/[_\-\s]+/g, " ")
+    .trim();
+  // Leading bracket: keep it and everything after it as-is, so `(cosplay)` is not `cosplay`.
+  if (/^[([{]/.test(folded)) {
+    return folded.replace(/\s+/g, " ").trim();
+  }
+  // Otherwise brackets are wrappers: drop the characters, keep the words inside them.
+  return folded
+    .replace(/[()[\]{}]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
  * Ranks tags for a query. Returns at most `limit` matches, best first.
  *
  * Each tag is scored on its best-matching key so an alias hit still surfaces the
@@ -296,6 +365,15 @@ export function matchTags(tags: readonly TagRecord[], query: string, limit = 50)
         // searchKeys[0] is the canonical name; anything later is an alias.
         bestAlias = index === 0 ? undefined : key;
       }
+    }
+
+    // Only surface an alias that says something the name does not. Exports often carry
+    // a punctuation-free spelling beside the real name — `jeanne d'arc (fate/grand
+    // order)` and `jeanne d'arc fate grand order` — and since the alias matches at
+    // least as well, it won the tie and the row showed the same text twice, both
+    // halves truncated, while the name lost a quarter of its width to the repeat.
+    if (bestAlias && comparableTagName(bestAlias) === comparableTagName(tag.name)) {
+      bestAlias = undefined;
     }
 
     if (best > 0) {
@@ -400,7 +478,16 @@ export function getTagFragmentAtCaret(
   // all 125,864 rows of a real export), so the marker is unambiguous syntax here.
   // Only the doubled colon is removed; a single `:` is real tag content, as in
   // `re:zero`.
-  const tagText = tagPart.replace(/::/g, "");
+  //
+  // Brace and bracket emphasis are stripped the same way. NovelAI scales attention with
+  // `{tag}` / `[tag]` (1.05x per level, so `{{{chibi}}}`), and those characters are
+  // syntax rather than tag content — `{{blonde` otherwise searched for "{blonde" and
+  // found nothing. Stripping is safe in both directions because the wrapper can be
+  // unbalanced while it is being typed (`{{blonde`) or closed after the tag
+  // (`2::photorealistic::`). No tag name contains any of these characters either;
+  // checking the real export, the only bracket-like names are emoticon tags such as
+  // `;)` and `>:(`, which contain no braces or square brackets at all.
+  const tagText = tagPart.replace(/::/g, "").replace(/[{}[\]]/g, "");
 
   // Keep a leading `*` in the query: it means "match anywhere" and is consumed by
   // `matchTags`. The range below already starts at the `*`, so completing replaces
@@ -422,10 +509,13 @@ export function getTagFragmentAtCaret(
   // (see above) so suggestions appear, and the replacement leaves the user's own typo
   // alone — rewriting text before the caret is riskier than tolerating it.
   //
-  // A segment can still begin with markers of its own (`::blonde`), and that leading
-  // run is skipped so the range does not include it. Only a doubled colon counts: a
-  // single `:` is real tag content (`re:zero`), and no tag name contains `::`.
-  const leadingMarkers = tagPart.match(/^(?:\s*::)+/)?.[0].length ?? 0;
+  // A segment can still begin with markers of its own (`::blonde`, `{{blonde`), and that
+  // leading run is skipped so the range does not include it. Only a doubled colon counts
+  // as a weight marker: a single `:` is real tag content (`re:zero`), and no tag name
+  // contains `::`. Braces and square brackets are unambiguous, so a run of any length is a
+  // marker — matching only pairs would leave the third of `{{{` inside the replaced range.
+  // No tag name starts with any of these characters.
+  const leadingMarkers = tagPart.match(/^(?:\s*(?:::|[{}[\]]+))+/)?.[0].length ?? 0;
   // A segment can also be indented without any marker ("masterpiece,   blonde"), and
   // that indent is not part of the tag either.
   const leadingWhitespace = tagPart.slice(leadingMarkers).length - tagPart.slice(leadingMarkers).trimStart().length;
