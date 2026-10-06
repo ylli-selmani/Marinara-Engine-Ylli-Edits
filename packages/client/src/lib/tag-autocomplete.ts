@@ -344,8 +344,6 @@ export function matchTags(tags: readonly TagRecord[], query: string, limit = 50)
  * becomes part of the tag name, leaving the tag uncompletable.
  */
 const WEIGHT_PREFIX = /^([-+]?(?:\d+(?:\.\d*)?|\.\d+))\s*::/;
-/** The closing `n::` of the same syntax, when the segment is written as `n::tag::`. */
-const WEIGHT_SUFFIX = /\s*::\s*$/;
 
 /**
  * Finds the tag fragment being typed at `caret`, plus the range to replace.
@@ -394,7 +392,15 @@ export function getTagFragmentAtCaret(
   const weightMatch = rawFragment.slice(fragmentIndent).match(WEIGHT_PREFIX);
   const weightLength = weightMatch ? weightMatch[0].length : 0;
   const tagPart = rawFragment.slice(fragmentIndent + weightLength);
-  const tagText = tagPart.replace(WEIGHT_SUFFIX, "");
+
+  // Drop every weight marker, not just the closing one. A misplaced comma can leave
+  // the closer stranded after the separator —
+  // `0.8::depth of field,:: blonde` — and the leftover `::` made the query
+  // `,:: blonde`, which matched nothing. No tag name contains `::` (checked against
+  // all 125,864 rows of a real export), so the marker is unambiguous syntax here.
+  // Only the doubled colon is removed; a single `:` is real tag content, as in
+  // `re:zero`.
+  const tagText = tagPart.replace(/::/g, "");
 
   // Keep a leading `*` in the query: it means "match anywhere" and is consumed by
   // `matchTags`. The range below already starts at the `*`, so completing replaces
@@ -410,11 +416,23 @@ export function getTagFragmentAtCaret(
   // keeps offering `blonde hair`.
   if (!trailing && /,$/.test(before)) return null;
 
-  const leadingWhitespace = tagText.length - tagText.trimStart().length;
+  // The range starts at the tag itself. A stranded closer is *ignored* rather than
+  // rewritten: in `depth of field,:: blonde` the `::` sits before the comma, so the
+  // segment is `,:: blonde` and the tag begins after it. `query` drops the marker
+  // (see above) so suggestions appear, and the replacement leaves the user's own typo
+  // alone — rewriting text before the caret is riskier than tolerating it.
+  //
+  // A segment can still begin with markers of its own (`::blonde`), and that leading
+  // run is skipped so the range does not include it. Only a doubled colon counts: a
+  // single `:` is real tag content (`re:zero`), and no tag name contains `::`.
+  const leadingMarkers = tagPart.match(/^(?:\s*::)+/)?.[0].length ?? 0;
+  // A segment can also be indented without any marker ("masterpiece,   blonde"), and
+  // that indent is not part of the tag either.
+  const leadingWhitespace = tagPart.slice(leadingMarkers).length - tagPart.slice(leadingMarkers).trimStart().length;
 
   return {
     query,
-    start: rawStart + fragmentIndent + weightLength + leadingWhitespace,
+    start: rawStart + fragmentIndent + weightLength + leadingMarkers + leadingWhitespace,
     end: caret + trailing.length + trailingSeparator.length,
   };
 }

@@ -214,6 +214,32 @@ assert.deepEqual(
   "a tag mid-list inside a weight group is completable",
 );
 
+// A comma typed before the closing marker leaves that marker stranded in front of
+// the next tag. The leftover `::` used to become part of the query, so the tag after
+// it matched nothing at all.
+//
+// The range starts at the tag, not at the stranded marker: rewriting text the user
+// already typed before the caret is riskier than leaving their own typo in place, and
+// the query is what has to be right for suggestions to appear.
+assert.deepEqual(
+  getTagFragmentAtCaret("0.8::depth of field,:: blonde", 29),
+  { query: "blonde", start: 23, end: 29 },
+  "a closing marker stranded after a comma does not poison the next query",
+);
+assert.deepEqual(
+  getTagFragmentAtCaret("2::pornhwa,::manhwa", 19),
+  { query: "manhwa", start: 13, end: 19 },
+  "a stranded marker with no space still resolves the next tag",
+);
+
+// Only the doubled colon is syntax. A single colon is real tag content, so it must
+// survive into the query or those tags become unsearchable.
+assert.deepEqual(
+  getTagFragmentAtCaret("re:zero", 7),
+  { query: "re:zero", start: 0, end: 7 },
+  "a single colon stays part of the tag name",
+);
+
 // Every weight spelling people actually write must parse. A weight that fails to
 // parse silently becomes part of the tag name, leaving the tag uncompletable with
 // no visible reason why — which is exactly how `2.::photorealistic::` broke.
