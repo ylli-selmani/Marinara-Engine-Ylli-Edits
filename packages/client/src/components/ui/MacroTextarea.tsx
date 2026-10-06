@@ -74,6 +74,8 @@ interface ExpandedMacroEditorProps {
   maxLength?: number;
   showTokenCount?: boolean;
   formatOnChange?: (textarea: HTMLTextAreaElement, inputEvent: InputEvent) => string;
+  /** Opt in to tag completion, matching the inline field this editor expands. */
+  enableTagAutocomplete?: boolean;
 }
 
 function ExpandedMacroEditor({
@@ -87,6 +89,7 @@ function ExpandedMacroEditor({
   maxLength,
   showTokenCount = false,
   formatOnChange,
+  enableTagAutocomplete = false,
 }: ExpandedMacroEditorProps) {
   const { t: localizeUi } = useUiTranslation();
   const [localValue, setLocalValue] = useState(value);
@@ -129,6 +132,26 @@ function ExpandedMacroEditor({
     },
     [formatOnChange, onChange],
   );
+
+  // Completion writes through the same two channels `handleChange` does, so an
+  // inserted tag is both shown in the editor and published to the caller. Updating
+  // only the field would lose it: this editor keeps `localValue` while open and
+  // publishes on close.
+  //
+  // `onChangeEvent` is what lets the hook see typing at all — without it the fragment
+  // is never recomputed and no list appears. `formatOnChange` still runs, because the
+  // hook delegates to `handleChange` rather than replacing it.
+  const autocomplete = useTagAutocomplete({
+    value: localValue,
+    onChange: (next) => {
+      setLocalValue(next);
+      onChange(next);
+    },
+    enabled: enableTagAutocomplete && !readOnly,
+    textareaRef,
+    onKeyDown: handleTextareaTab,
+    onChangeEvent: handleChange,
+  });
 
   if (!open) {
     return null;
@@ -176,13 +199,14 @@ function ExpandedMacroEditor({
             ref={textareaRef}
             value={localValue}
             onChange={handleChange}
-            onKeyDown={handleTextareaTab}
+            onKeyDown={autocomplete.textareaProps.onKeyDown}
             placeholder={placeholder}
             readOnly={readOnly}
             maxLength={maxLength}
             className="min-h-0 flex-1 resize-none bg-[var(--sidebar)] p-4 font-mono text-sm leading-6 text-[var(--foreground)] outline-none placeholder:text-[var(--muted-foreground)]"
             spellCheck={false}
           />
+          <TagAutocompleteOverlay autocomplete={autocomplete} textareaRef={textareaRef} />
         </div>
       </div>
     </MacroModalPortal>
@@ -544,9 +568,15 @@ export function MacroTextarea({
         maxLength={maxLength}
         showTokenCount={showTokenCount}
         formatOnChange={formatOnChange}
+        // Passed through so expanding a tag field keeps completion. Both editors own
+        // their own textarea, so each needs its own overlay.
+        enableTagAutocomplete={enableTagAutocomplete}
       />
       <MacrosReferenceModal open={showMacroRef} onClose={() => setShowMacroRef(false)} />
-      <TagAutocompleteOverlay autocomplete={autocomplete} textareaRef={textareaRef} />
+      {/* Only the visible editor shows a list. The expanded editor is a separate
+          textarea with its own overlay, and leaving this one mounted while it is open
+          would anchor a popup to a field the user cannot see. */}
+      {!expanded && <TagAutocompleteOverlay autocomplete={autocomplete} textareaRef={textareaRef} />}
     </>
   );
 }

@@ -4468,6 +4468,8 @@ function PersonaCardTab({
                 onChange={(v) => updateField("imageAppearance", v)}
                 placeholder={localizeUi("ui.characters.charactercardtab.imageAppearancePlaceholder")}
                 rows={6}
+                // Image-model tags, not prose: this seeds the persona's avatar prompt.
+                enableTagAutocomplete
               />
             </div>
           )}
@@ -4567,6 +4569,14 @@ function TextareaTab({
   placeholder,
   rows = 8,
   helpText,
+  /**
+   * Opt this tab's field in to tag completion.
+   *
+   * Deliberately not defaulted: this helper renders the persona's prose fields as
+   * well as the image-appearance prompt, so a default here would offer booru tags
+   * while someone writes a persona's description.
+   */
+  enableTagAutocomplete = false,
 }: {
   title: string;
   subtitle: string;
@@ -4575,6 +4585,7 @@ function TextareaTab({
   onChange: (v: string) => void;
   placeholder: string;
   rows?: number;
+  enableTagAutocomplete?: boolean;
 }) {
   const { t: localizeUi } = useUiTranslation();
   return (
@@ -4587,6 +4598,7 @@ function TextareaTab({
         rows={rows}
         title={title}
         showMarkdownPreview
+        enableTagAutocomplete={enableTagAutocomplete}
         className="w-full resize-y rounded-xl border border-[var(--border)] bg-[var(--secondary)] p-4 text-sm leading-relaxed outline-none transition-colors placeholder:text-[var(--muted-foreground)]/40 focus:border-emerald-400/40 focus:ring-1 focus:ring-emerald-400/20"
       />
       <p className="mt-1.5 text-right text-[0.625rem] text-[var(--muted-foreground)]">

@@ -12,8 +12,15 @@
 import assert from "node:assert/strict";
 
 const { parseTagCsv, splitTagCsvLine: splitCsvLine } = await import("../../packages/shared/src/utils/tag-csv.js");
-const { applyTagCompletion, createTagIndex, displayTagName, getTagFragmentAtCaret, matchTags } =
-  await import("../../packages/client/src/lib/tag-autocomplete.js");
+const {
+  applyTagCompletion,
+  comparableTagName,
+  createTagIndex,
+  displayTagName,
+  getTagFragmentAtCaret,
+  matchTags,
+  sameTagName,
+} = await import("../../packages/client/src/lib/tag-autocomplete.js");
 
 // --- CSV field splitting ----------------------------------------------------
 
@@ -240,6 +247,62 @@ assert.deepEqual(
   "a single colon stays part of the tag name",
 );
 
+// Brace and bracket emphasis are syntax too, not tag content. NovelAI scales attention
+// with `{tag}` / `[tag]` at 1.05x per level, so `{{blonde` is a normal thing to type —
+// and before this was handled the query became `{blonde`, which matched nothing.
+{
+  const emphasized: Array<[string, string]> = [
+    ["{{blonde", "blonde"],
+    ["{{{blonde", "blonde"],
+    ["[[blonde", "blonde"],
+    ["[[[blonde", "blonde"],
+    ["{{blonde}}", "blonde"],
+    ["masterpiece, {{blonde", "blonde"],
+    ["1.2::{{blonde", "blonde"],
+    ["[[long hair", "long hair"],
+  ];
+  for (const [text, query] of emphasized) {
+    assert.equal(
+      getTagFragmentAtCaret(text, text.length)?.query,
+      query,
+      `${JSON.stringify(text)} should search for the tag inside the emphasis`,
+    );
+  }
+
+  // The leading run is skipped, not replaced, so completing keeps the emphasis the user
+  // typed. A run of any length counts: matching only pairs left the third brace of `{{{`
+  // inside the replaced range.
+  assert.deepEqual(
+    getTagFragmentAtCaret("{{blonde", 8),
+    { query: "blonde", start: 2, end: 8 },
+    "the opening braces are left out of the replaced range",
+  );
+  assert.deepEqual(
+    getTagFragmentAtCaret("{{{blonde", 9),
+    { query: "blonde", start: 3, end: 9 },
+    "every brace in the opening run is skipped",
+  );
+
+  // Completing inside emphasis must preserve it, the same way it preserves a weight.
+  // `applyTagCompletion` inserts the display form, so underscores become spaces.
+  assert.equal(
+    applyTagCompletion("{{blonde", getTagFragmentAtCaret("{{blonde", 8)!, "blonde_hair").value,
+    "{{blonde hair, ",
+    "completing inside braces keeps the braces",
+  );
+  assert.equal(
+    applyTagCompletion("[[blonde", getTagFragmentAtCaret("[[blonde", 8)!, "blonde_hair").value,
+    "[[blonde hair, ",
+    "completing inside brackets keeps the brackets",
+  );
+  // Emphasis and a weight on the same segment: both wrappers survive.
+  assert.equal(
+    applyTagCompletion("1.2::{{blonde", getTagFragmentAtCaret("1.2::{{blonde", 13)!, "blonde_hair").value,
+    "1.2::{{blonde hair, ",
+    "a weight and emphasis are both preserved",
+  );
+}
+
 // Every weight spelling people actually write must parse. A weight that fails to
 // parse silently becomes part of the tag name, leaving the tag uncompletable with
 // no visible reason why — which is exactly how `2.::photorealistic::` broke.
@@ -332,6 +395,114 @@ assert.equal(matchTags(vocabulary, "long_ha", 5)[0]?.tag.name, "long_hair", "the
 const aliasHit = matchTags(vocabulary, "hires", 5).find((match) => match.tag.name === "highres");
 assert.ok(aliasHit, "an alias query surfaces the canonical tag");
 assert.equal(aliasHit.matchedAlias, "hires", "the matching alias is reported for display");
+
+// The "you already wrote this" badge is an identity claim about the user's text, so
+// it uses the stricter comparison. The punctuation-blind one it used to share with
+// alias suppression conflates genuinely different tags — it maps `bluesky` onto
+// `blue_sky`, `blood` onto `blood+` and `witch` onto `w.i.t.c.h.`, all pairs of
+// distinct real tags (135 such collision groups exist in a real export). Badging one
+// of those would tell the user their text is something it is not.
+{
+  // Same tag, punctuation typed differently: these must still be recognized.
+  const sameAsWritten: Array<[string, string]> = [
+    ["watercolor pencil medium", "watercolor_pencil_(medium)"],
+    ["watercolor pencil (medium)", "watercolor_pencil_(medium)"],
+    ["blonde hair", "blonde_hair"],
+    ["Blonde Hair", "blonde_hair"],
+    ["blue eyes", "blue-eyes"],
+    ["the idolmaster", "the_idolmaster"],
+  ];
+  for (const [typed, canonical] of sameAsWritten) {
+    assert.equal(sameTagName(typed, canonical), true, `"${typed}" is the tag ${canonical}`);
+  }
+
+  // Distinct real tags that the lossy comparison would have merged. Each of these
+  // pairs exists as two separate tags in a Danbooru export.
+  const distinct: Array<[string, string]> = [
+    ["bluesky", "blue_sky"],
+    ["foxtail", "fox_tail"],
+    ["cattail", "cat_tail"],
+    ["blood", "blood+"],
+    ["witch", "w.i.t.c.h."],
+    ["teapot", "tea/pot"],
+    ["denim", "deni_m"],
+    ["snow", "s-now"],
+    ["re:zero", "rezero"],
+  ];
+  for (const [typed, other] of distinct) {
+    assert.equal(sameTagName(typed, other), false, `"${typed}" is not the tag ${other}`);
+  }
+
+  // A bracket that OPENS a name is the tag's identity, not a qualifier wrapper, so it must
+  // not be dropped. Unconditionally stripping brackets merged these separate tags, which is
+  // the same class of false positive the list above guards against.
+  const leadingBracketIsContent: Array<[string, string]> = [
+    ["(cosplay)", "cosplay"],
+    ["[artist]_name", "artist name"],
+    ["a", "(a)"],
+    ["a", "[a]"],
+  ];
+  for (const [typed, other] of leadingBracketIsContent) {
+    assert.equal(
+      sameTagName(typed, other),
+      false,
+      `a leading bracket is content, so "${typed}" is not the tag ${other}`,
+    );
+  }
+
+  // A TRAILING bracket is a qualifier wrapper, and the word inside it is what a person
+  // keeps when typing by hand — so the bracketed and unbracketed spellings are the same
+  // tag. This is the case that forbids the simpler "drop every bracket" rule.
+  const trailingBracketIsWrapper: Array<[string, string]> = [
+    ["school_(uniform)", "school uniform"],
+    ["sword_(weapon)", "sword weapon"],
+  ];
+  for (const [a, b] of trailingBracketIsWrapper) {
+    assert.equal(sameTagName(a, b), true, `"${a}" is the tag ${b}`);
+  }
+
+  // The lossy comparison is still the right one for deciding whether an alias adds
+  // information, which is why both functions exist.
+  assert.equal(
+    comparableTagName("blondehair"),
+    comparableTagName("blonde_hair"),
+    "the alias comparison still treats a punctuation-only restatement as redundant",
+  );
+}
+
+// An alias that only restates the name is not worth a row slot. Exports carry a
+// punctuation-free spelling beside the real name, and because it scores at least as
+// well it used to be displayed — so `blonde_hair` rendered as "blonde hair" followed
+// by "blondehair", the same text twice, both truncated, with the name losing a
+// quarter of the row to the repeat. 468 of the aliases in a real export are like this.
+{
+  const redundant = parseTagCsv(
+    ["name,postCount,category,aliases", "blonde_hair,2195202,0,blondehair", "blue_eyes,800000,0,blueeyes"].join("\n"),
+  ).tags;
+
+  for (const query of ["blonde", "blondeh", "blue"]) {
+    const match = matchTags(redundant, query, 5)[0];
+    assert.ok(match, `"${query}" should match a tag`);
+    assert.equal(
+      match.matchedAlias,
+      undefined,
+      `a punctuation-only alias must not be shown beside the name (query was "${query}")`,
+    );
+  }
+
+  // The alias must still be *searchable*: suppressing it for display must not make
+  // the tag unfindable by the spelling someone actually typed.
+  const byAlias = matchTags(redundant, "blondehair", 5);
+  assert.equal(byAlias[0]?.tag.name, "blonde_hair", "the alias still finds the tag it belongs to");
+
+  // A genuinely different alias is unaffected.
+  const distinct = parseTagCsv(
+    ["name,postCount,category,aliases", "colored_eyelashes,59782,0,blonde_eyelashes"].join("\n"),
+  ).tags;
+  const distinctMatch = matchTags(distinct, "blonde eyelashes", 5)[0];
+  assert.equal(distinctMatch?.tag.name, "colored_eyelashes", "a distinct alias still finds its tag");
+  assert.equal(distinctMatch?.matchedAlias, "blonde eyelashes", "a distinct alias is still shown for display");
+}
 
 assert.equal(matchTags(vocabulary, "1girl", 5)[0]?.tag.name, "1girl", "an exact prefix outranks longer siblings");
 

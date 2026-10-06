@@ -1377,6 +1377,9 @@ function CharacterCardTab({
                 onChange={(v) => updateExtension("imageAppearance", v)}
                 placeholder={localizeUi("ui.characters.charactercardtab.imageAppearancePlaceholder")}
                 rows={6}
+                // These are image-model tags, not prose: the field seeds the avatar
+                // generator with the appearance prompt.
+                enableTagAutocomplete
               />
             </div>
           )}
@@ -1517,6 +1520,15 @@ function TextareaTab({
   placeholder,
   rows = 8,
   helpText,
+  /**
+   * Opt this tab's field in to tag completion.
+   *
+   * Deliberately not defaulted: this one helper renders both the card's prose fields
+   * (description, personality, scenario, backstory) and the image-appearance prompt,
+   * so a default here would offer booru tags while someone writes a character's
+   * backstory.
+   */
+  enableTagAutocomplete = false,
 }: {
   title: string;
   subtitle: string;
@@ -1525,6 +1537,7 @@ function TextareaTab({
   onChange: (v: string) => void;
   placeholder: string;
   rows?: number;
+  enableTagAutocomplete?: boolean;
 }) {
   const selfCharacterId = useUIStore((s) => s.characterDetailId);
   return (
@@ -1539,6 +1552,7 @@ function TextareaTab({
         title={title}
         showMarkdownPreview
         selfCharacterId={selfCharacterId}
+        enableTagAutocomplete={enableTagAutocomplete}
         className="w-full resize-y rounded-xl border border-[var(--border)] bg-[var(--secondary)] p-4 text-sm leading-relaxed outline-none transition-colors placeholder:text-[var(--muted-foreground)]/40 focus:border-[var(--primary)]/40 focus:ring-1 focus:ring-[var(--primary)]/20"
       />
     </div>
