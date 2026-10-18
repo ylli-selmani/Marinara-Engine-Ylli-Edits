@@ -3026,19 +3026,6 @@ export function useGenerate() {
               break;
             }
 
-            case "image_prompt_review": {
-              // The illustration was parked for approval instead of generated. Nothing
-              // will arrive on this stream, so stop waiting for it and hand the review
-              // item to the modal (the retry loop dispatches the same event).
-              illustrationSettled = true;
-              window.dispatchEvent(
-                new CustomEvent("marinara:image-prompt-review", {
-                  detail: event.data as Record<string, unknown>,
-                }),
-              );
-              break;
-            }
-
             case "agent_error": {
               const errData = event.data as {
                 agentType: string;
