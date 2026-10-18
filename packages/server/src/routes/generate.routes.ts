@@ -424,6 +424,8 @@ import {
   resolveNovelAiCharacterPromptLimit,
   supportsNovelAiCharacterPrompts,
 } from "../services/image/character-prompts.js";
+import { resolveImagePromptReviewSize } from "../services/image/image-prompt-review.js";
+import { shouldReviewMediaPrompts } from "../services/media/media-review-settings.js";
 import { resolveCustomAgentStyleProfileId } from "../services/generation/custom-agent-image-settings.js";
 import { buildSpotifyDjConstraints } from "../services/spotify/spotify-dj-constraints.js";
 import {
@@ -13694,10 +13696,14 @@ export async function generateRoutes(app: FastifyInstance, options: GenerateRout
                 imgConnFull ??= await connections.getDefaultForImageGeneration();
                 if (imgConnFull) {
                   const resolvedImageConnection = imgConnFull;
-                  sendSseEvent(reply, {
-                    type: "illustration_queued",
-                    data: { messageId },
-                  });
+                  // With prompt review on nothing is queued: the illustration is parked as
+                  // a review item and the client re-asks after approval (see below).
+                  if (!shouldReviewMediaPrompts()) {
+                    sendSseEvent(reply, {
+                      type: "illustration_queued",
+                      data: { messageId },
+                    });
+                  }
                   // Queue image generation to run after the result loop so it doesn't
                   // block other agents (game state, trackers, rewrite agents).
                   // Keep earlier images alive when automatic and command requests share a turn.
@@ -13964,6 +13970,40 @@ export async function generateRoutes(app: FastifyInstance, options: GenerateRout
                             }
                           : undefined;
                       fullPrompt = compiledPrompt.prompt;
+
+                      // "Expose media prompts before sending": park the illustration as a
+                      // review item instead of generating. The client re-requests it through
+                      // /generate/retry-agents with the reviewed prompt, the same path the
+                      // manual Illustration button uses.
+                      if (shouldReviewMediaPrompts()) {
+                        const previewSize = resolveImagePromptReviewSize({
+                          connection: imgConnFull,
+                          prompt: compiledPrompt.prompt,
+                          width: imgWidth,
+                          height: imgHeight,
+                          imageDefaults,
+                        });
+                        sendSseEvent(reply, {
+                          type: "image_prompt_review",
+                          data: {
+                            chatId: input.chatId,
+                            item: {
+                              id: "roleplay-scene-illustration",
+                              kind: "illustration",
+                              title: "Scene illustration",
+                              prompt: compiledPrompt.prompt,
+                              ...(finalNegativePrompt ? { negativePrompt: finalNegativePrompt } : {}),
+                              width: previewSize.width,
+                              height: previewSize.height,
+                              ...(illustratorCharacterPrompts.length > 0
+                                ? { characterPrompts: illustratorCharacterPrompts }
+                                : {}),
+                            },
+                            resultData: illData,
+                          },
+                        });
+                        return;
+                      }
 
                       const imageResults = await generateIllustratorImageVariants({
                         count: chatMeta.illustratorImagesPerGeneration,
