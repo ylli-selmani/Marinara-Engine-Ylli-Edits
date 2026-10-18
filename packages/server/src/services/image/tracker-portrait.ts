@@ -54,6 +54,58 @@ export function trackerPortraitStyleProfileId(chatMeta: Record<string, unknown>)
   return typeof id === "string" ? id : null;
 }
 
+/** What the prompt-review modal needs to show a tracker portrait before it is sent. */
+export interface TrackerPortraitPreviewItem {
+  id: string;
+  kind: "portrait";
+  title: string;
+  prompt: string;
+  negativePrompt?: string;
+  width: number;
+  height: number;
+}
+
+type TrackerPortraitPlanArgs = {
+  db: DB;
+  connectionId: string;
+  styleProfileId: string | null;
+  character: TrackerPortraitCharacter;
+  includeOutfit: boolean;
+};
+
+/** Connection, chat style and compiled prompt, resolved once for both preview and generation. */
+async function resolveTrackerPortraitPlan(args: TrackerPortraitPlanArgs) {
+  const connections = createConnectionsStorage(args.db);
+  const connection = await connections.getWithKey(args.connectionId);
+  if (!connection) throw new Error("Image connection not found");
+  const imageSettings = await loadImageGenerationUserSettings(args.db);
+  const imageDefaults = resolveConnectionImageDefaults(connection);
+  const compiled = compileImagePrompt({
+    kind: "portrait",
+    prompt: buildTrackerPortraitPrompt(args.character, args.includeOutfit),
+    styleProfiles: imageSettings.styleProfiles,
+    styleProfileId: args.styleProfileId,
+    imageDefaults,
+  });
+  return { connections, connection, imageSettings, imageDefaults, compiled };
+}
+
+/** The compiled portrait prompt, for the review dialog. Generates nothing and saves nothing. */
+export async function previewTrackerPortrait(args: TrackerPortraitPlanArgs): Promise<TrackerPortraitPreviewItem[]> {
+  const { imageSettings, compiled } = await resolveTrackerPortraitPlan(args);
+  return [
+    {
+      id: `tracker-portrait-${npcAvatarSlug(args.character.name) || "character"}`,
+      kind: "portrait",
+      title: `Portrait of ${clause(args.character.name, 100) || "Character"}`,
+      prompt: compiled.prompt,
+      ...(compiled.negativePrompt ? { negativePrompt: compiled.negativePrompt } : {}),
+      width: imageSettings.portrait.width,
+      height: imageSettings.portrait.height,
+    },
+  ];
+}
+
 /** Refuses a portrait: one for this character is already being made, or a newer one was saved meanwhile. */
 export class TrackerPortraitConflictError extends Error {}
 
@@ -78,6 +130,9 @@ export async function generateTrackerPortrait(args: {
   character: TrackerPortraitCharacter;
   includeOutfit: boolean;
   debugMode?: boolean;
+  /** Reviewed prompt from the review dialog; replaces the compiled one verbatim. */
+  prompt?: string;
+  negativePrompt?: string;
   onFallback?: ImageGenRequest["onFallback"];
 }): Promise<string> {
   const safeName = npcAvatarSlug(args.character.name);
@@ -91,27 +146,17 @@ export async function generateTrackerPortrait(args: {
   portraitsInProgress.add(portraitFile);
   try {
     const savedBefore = savedFileStamp(portraitFile);
-    const connections = createConnectionsStorage(args.db);
-    const connection = await connections.getWithKey(args.connectionId);
-    if (!connection) throw new Error("Image connection not found");
+    const { connections, connection, imageSettings, imageDefaults, compiled } = await resolveTrackerPortraitPlan(args);
     const model = connection.model || "";
-    const imageDefaults = resolveConnectionImageDefaults(connection);
-    const imageSettings = await loadImageGenerationUserSettings(args.db);
-    const compiled = compileImagePrompt({
-      kind: "portrait",
-      prompt: buildTrackerPortraitPrompt(args.character, args.includeOutfit),
-      styleProfiles: imageSettings.styleProfiles,
-      styleProfileId: args.styleProfileId,
-      imageDefaults,
-    });
+    // A reviewed prompt replaces the compiled one verbatim; an emptied negative prompt stays empty.
+    const prompt = args.prompt?.trim() || compiled.prompt;
+    const negativePrompt = args.prompt
+      ? (args.negativePrompt ?? "").trim() || undefined
+      : compiled.negativePrompt || undefined;
     const debugOverrideEnabled = args.debugMode === true || isDebugAgentsEnabled();
-    logDebugOverride(debugOverrideEnabled, "[debug/character-tracker/portrait] prompt:\n%s", compiled.prompt);
-    if (compiled.negativePrompt) {
-      logDebugOverride(
-        debugOverrideEnabled,
-        "[debug/character-tracker/portrait] negative prompt:\n%s",
-        compiled.negativePrompt,
-      );
+    logDebugOverride(debugOverrideEnabled, "[debug/character-tracker/portrait] prompt:\n%s", prompt);
+    if (negativePrompt) {
+      logDebugOverride(debugOverrideEnabled, "[debug/character-tracker/portrait] negative prompt:\n%s", negativePrompt);
     }
     const image = await generateImage(
       model,
@@ -119,8 +164,8 @@ export async function generateTrackerPortrait(args: {
       connection.apiKey || "",
       connection.imageService || (connection as { imageGenerationSource?: string }).imageGenerationSource || model,
       {
-        prompt: compiled.prompt,
-        negativePrompt: compiled.negativePrompt || undefined,
+        prompt,
+        negativePrompt,
         model,
         width: imageSettings.portrait.width,
         height: imageSettings.portrait.height,

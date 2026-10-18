@@ -17,6 +17,7 @@ import {
   renameTrackerFieldLockPrefix,
 } from "@marinara-engine/shared";
 import { api } from "../../../lib/api-client";
+import type { ImagePromptOverride, ImagePromptReviewItem } from "../../../components/ui/ImagePromptReviewModal";
 import { useGameStateStore } from "../../../stores/game-state.store";
 import { useUIStore } from "../../../stores/ui.store";
 import type { GameStatePatchField } from "../../../hooks/use-game-state-patcher";
@@ -231,6 +232,54 @@ export function useTrackerMutations({
     [activeChatId, readPresentCharacters, saveAvatarPath],
   );
 
+  /** Portrait request payload; the reviewed prompt is added on top when one comes back. */
+  type TrackerPortraitRequestBody = {
+    name: string;
+    appearance: string | null;
+    outfit: string | null;
+    includeOutfit: boolean;
+    debugMode: boolean;
+  };
+
+  // "Expose media prompts before sending": the compiled portrait prompt waits here until the
+  // user confirms it, exactly like the selfie, sprite and avatar flows.
+  const [portraitReview, setPortraitReview] = useState<{
+    items: ImagePromptReviewItem[];
+    characterId: string;
+    index: number;
+    body: TrackerPortraitRequestBody;
+  } | null>(null);
+
+  const runPortraitGeneration = useCallback(
+    async (
+      pending: { characterId: string; index: number; body: TrackerPortraitRequestBody },
+      reviewedPrompt?: ImagePromptOverride,
+    ) => {
+      if (!activeChatId) return;
+      const token = avatarUploadSerialRef.current + 1;
+      avatarUploadSerialRef.current = token;
+      avatarUploadTokenByCharacterRef.current.set(pending.characterId, token);
+      try {
+        const response = await api.post<{ avatarPath: string }>(`/avatars/npc/${activeChatId}/generate`, {
+          ...pending.body,
+          ...(reviewedPrompt
+            ? { prompt: reviewedPrompt.prompt, negativePrompt: reviewedPrompt.negativePrompt ?? "" }
+            : {}),
+        });
+        saveAvatarPath(pending.characterId, pending.index, token, response.avatarPath);
+      } catch (error) {
+        toast.error(localizeUi("ui.trackerPanel.featuredcharacterportrait.newPortraitFailed"), {
+          description: error instanceof Error ? error.message : undefined,
+        });
+      } finally {
+        if (avatarUploadTokenByCharacterRef.current.get(pending.characterId) === token) {
+          avatarUploadTokenByCharacterRef.current.delete(pending.characterId);
+        }
+      }
+    },
+    [activeChatId, localizeUi, saveAvatarPath],
+  );
+
   /** A new tracker portrait from the look, and the outfit when asked; the old one stays if this fails. */
   const generateAvatar = useCallback(
     async (index: number, includeOutfit: boolean) => {
@@ -240,31 +289,52 @@ export function useTrackerMutations({
       const character = currentCharacters[resolveCharacterTargetIndex(currentCharacters, characterId, index)];
       if (!character) return;
 
-      const token = avatarUploadSerialRef.current + 1;
-      avatarUploadSerialRef.current = token;
-      avatarUploadTokenByCharacterRef.current.set(characterId, token);
-      try {
-        const response = await api.post<{ avatarPath: string }>(`/avatars/npc/${activeChatId}/generate`, {
+      const pending = {
+        characterId,
+        index,
+        body: {
           name: character.name,
           // Tracker fields are raw model output; send only text.
           appearance: typeof character.appearance === "string" ? character.appearance : null,
           outfit: typeof character.outfit === "string" ? character.outfit : null,
           includeOutfit,
           debugMode: useUIStore.getState().debugMode,
-        });
-        saveAvatarPath(characterId, index, token, response.avatarPath);
-      } catch (error) {
-        toast.error(localizeUi("ui.trackerPanel.featuredcharacterportrait.newPortraitFailed"), {
-          description: error instanceof Error ? error.message : undefined,
-        });
-      } finally {
-        if (avatarUploadTokenByCharacterRef.current.get(characterId) === token) {
-          avatarUploadTokenByCharacterRef.current.delete(characterId);
+        },
+      };
+      if (useUIStore.getState().reviewImagePromptsBeforeSend) {
+        try {
+          const preview = await api.post<{ items?: ImagePromptReviewItem[] }>(`/avatars/npc/${activeChatId}/generate`, {
+            ...pending.body,
+            previewOnly: true,
+          });
+          if (preview.items?.length) {
+            setPortraitReview({ ...pending, items: preview.items });
+            return;
+          }
+        } catch (error) {
+          toast.error(localizeUi("ui.trackerPanel.featuredcharacterportrait.newPortraitFailed"), {
+            description: error instanceof Error ? error.message : undefined,
+          });
+          return;
         }
       }
+      await runPortraitGeneration(pending);
     },
-    [activeChatId, localizeUi, presentCharacters, readPresentCharacters, saveAvatarPath],
+    [activeChatId, localizeUi, presentCharacters, readPresentCharacters, runPortraitGeneration],
   );
+
+  const confirmPortraitReview = useCallback(
+    async (overrides: ImagePromptOverride[]) => {
+      const pending = portraitReview;
+      if (!pending) return;
+      setPortraitReview(null);
+      const override = overrides.find((entry) => entry.id === pending.items[0]?.id) ?? overrides[0];
+      await runPortraitGeneration(pending, override);
+    },
+    [portraitReview, runPortraitGeneration],
+  );
+
+  const cancelPortraitReview = useCallback(() => setPortraitReview(null), []);
 
   const handleAvatarFileInputChange = useCallback(
     (event: ChangeEvent<HTMLInputElement>) => {
@@ -440,9 +510,12 @@ export function useTrackerMutations({
     addPersonaStat,
     addQuest,
     avatarFileInputRef,
+    cancelPortraitReview,
+    confirmPortraitReview,
     generateAvatar,
     handleAvatarFileInputChange,
     openAvatarUpload,
+    portraitReview,
     removeCharacter,
     removeQuest,
     savePersonaStatus,

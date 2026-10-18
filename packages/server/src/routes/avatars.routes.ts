@@ -13,6 +13,7 @@ import { sendValidatedMediaFile, validateImageAssetFile } from "../utils/media-f
 import { npcAvatarSlug } from "../services/game/npc-avatar-utils.js";
 import {
   generateTrackerPortrait,
+  previewTrackerPortrait,
   TrackerPortraitConflictError,
   trackerPortraitStyleProfileId,
 } from "../services/image/tracker-portrait.js";
@@ -25,6 +26,11 @@ const trackerPortraitRequestSchema = z.object({
   outfit: z.string().max(20000).nullish(),
   includeOutfit: z.boolean(),
   debugMode: z.boolean().optional(),
+  // "Expose media prompts before sending": compile the prompt and save nothing.
+  previewOnly: z.boolean().optional(),
+  // The reviewed prompt coming back from that dialog.
+  prompt: z.string().max(4000).optional(),
+  negativePrompt: z.string().max(4000).optional(),
 });
 
 const AVATAR_DIR = join(DATA_DIR, "avatars");
@@ -142,22 +148,39 @@ export async function avatarsRoutes(app: FastifyInstance) {
     if (typeof connectionId !== "string" || !connectionId.trim()) {
       return reply.status(400).send({ error: "Choose an image connection for the Character Tracker first." });
     }
+    const styleProfileId = trackerPortraitStyleProfileId(parseAgentSettingsRecord(chat.metadata));
     try {
+      if (body.data.previewOnly) {
+        const items = await previewTrackerPortrait({
+          db: app.db,
+          connectionId,
+          styleProfileId,
+          character: body.data,
+          includeOutfit: body.data.includeOutfit,
+        });
+        return reply.send({ items });
+      }
       const avatarPath = await generateTrackerPortrait({
         db: app.db,
         connectionId,
         chatId: chat.id,
-        styleProfileId: trackerPortraitStyleProfileId(parseAgentSettingsRecord(chat.metadata)),
+        styleProfileId,
         character: body.data,
         includeOutfit: body.data.includeOutfit,
         debugMode: body.data.debugMode,
+        prompt: body.data.prompt,
+        negativePrompt: body.data.negativePrompt,
       });
       return reply.send({ avatarPath: `${avatarPath}?v=${Date.now()}` });
     } catch (err) {
       logger.warn(err, '[character-tracker] Failed to generate a portrait for "%s"', body.data.name);
       // Provider and file errors stay in the log; they can carry upstream text or local paths.
       if (err instanceof TrackerPortraitConflictError) return reply.status(409).send({ error: err.message });
-      return reply.status(502).send({ error: "Portrait generation failed. The server log has the details." });
+      return reply.status(502).send({
+        error: body.data.previewOnly
+          ? "Portrait prompt review failed. The server log has the details."
+          : "Portrait generation failed. The server log has the details.",
+      });
     }
   });
 }

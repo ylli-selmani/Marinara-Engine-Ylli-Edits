@@ -13,6 +13,7 @@ import { useTrackerPanelModel } from "../hooks/use-tracker-panel-model";
 import { getSpriteExpressionForCharacter } from "../lib/sprite-expressions";
 import { FeaturedCharacterTrackerCard } from "./character-card/FeaturedCharacterTrackerCard";
 import { AddRowButton, EmptySection, SectionIconButton } from "./controls/SectionControls";
+import { TrackerPortraitReviewModal } from "./TrackerPortraitReviewModal";
 import { useTrackerLockContext } from "./TrackerLockContext";
 
 const CHARACTER_SECTIONS: TrackerDataPanelSection[] = ["characters"];
@@ -75,9 +76,12 @@ export function TrackerWindowCharacters({
     removeCharacter,
     updateCharacter,
     avatarFileInputRef,
+    cancelPortraitReview,
+    confirmPortraitReview,
     generateAvatar,
     handleAvatarFileInputChange,
     openAvatarUpload,
+    portraitReview,
   } = useTrackerMutations({
     activeChatId: chatId,
     customFields: [],
@@ -222,6 +226,11 @@ export function TrackerWindowCharacters({
         accept="image/*"
         className="hidden"
         onChange={handleAvatarFileInputChange}
+      />
+      <TrackerPortraitReviewModal
+        items={portraitReview?.items ?? null}
+        onCancel={cancelPortraitReview}
+        onConfirm={(overrides) => void confirmPortraitReview(overrides)}
       />
     </div>
   );

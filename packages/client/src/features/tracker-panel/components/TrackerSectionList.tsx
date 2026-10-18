@@ -30,6 +30,7 @@ import { CharacterTrackerPanel } from "./sections/CharacterTrackerPanel";
 import { CustomTrackerPanel } from "./sections/CustomTrackerPanel";
 import { PersonaInventoryPanel } from "./sections/PersonaInventoryPanel";
 import { InventoryTrackerPanel } from "./sections/InventoryTrackerPanel";
+import { TrackerPortraitReviewModal } from "./TrackerPortraitReviewModal";
 import { QuestTrackerPanel } from "./sections/quest-tracker/QuestTrackerPanel";
 import { WorldStatePanel } from "./sections/WorldStatePanel";
 
@@ -146,9 +147,12 @@ export function TrackerSectionList({
     addPersonaStat,
     addQuest,
     avatarFileInputRef,
+    cancelPortraitReview,
+    confirmPortraitReview,
     generateAvatar,
     handleAvatarFileInputChange,
     openAvatarUpload,
+    portraitReview,
     removeCharacter,
     removeQuest,
     savePersonaStatus,
@@ -355,6 +359,11 @@ export function TrackerSectionList({
       ))}
       {!orderedTrackerSections.includes("custom") ? beforeCustomSections : null}
       {afterCustomSections}
+      <TrackerPortraitReviewModal
+        items={portraitReview?.items ?? null}
+        onCancel={cancelPortraitReview}
+        onConfirm={(overrides) => void confirmPortraitReview(overrides)}
+      />
     </>
   );
 }
