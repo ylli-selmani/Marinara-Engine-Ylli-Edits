@@ -187,7 +187,7 @@ export function LibraryToolbar({
       </div>
 
       <div className="flex gap-1.5">
-        <div className="relative flex-1">
+        <div className="relative min-w-0 flex-1">
           <Search
             size="0.8125rem"
             className="mari-chrome-field-icon pointer-events-none absolute left-3 top-1/2 -translate-y-1/2"

@@ -619,11 +619,11 @@ export function AgentsPanel() {
   // a filter the user can no longer see or clear must not hide the rulesets.
   const visibleRulesets = installedRulesets.filter(
     ({ definition }) =>
-      !hasInstalledAgents ||
-      ((agentModeFilter === "all" || agentModeFilter === "game") &&
-        (!agentSearchQuery ||
-          definition.name.toLowerCase().includes(agentSearchQuery) ||
-          definition.coverage.summary.toLowerCase().includes(agentSearchQuery))),
+      // The mode filter only shows once agents exist; the search field always shows, so it always applies.
+      (!hasInstalledAgents || agentModeFilter === "all" || agentModeFilter === "game") &&
+      (!agentSearchQuery ||
+        definition.name.toLowerCase().includes(agentSearchQuery) ||
+        definition.coverage.summary.toLowerCase().includes(agentSearchQuery)),
   );
 
   const confirmAndUninstallRuleset = async (packageId: string, name: string) => {
@@ -1526,7 +1526,7 @@ export function AgentsPanel() {
         </p>
       )}
 
-      {hasInstalledAgents && (
+      {(hasInstalledAgents || agentFolders.length > 0) && (
         <div className="flex flex-col gap-1.5">
           {draggedAgentId && (
             <div
