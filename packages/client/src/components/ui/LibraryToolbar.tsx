@@ -136,8 +136,8 @@ export function LibraryToolbar({
         <button
           type="button"
           onClick={() => {
-            // aria-disabled, not disabled, so the title explaining why stays reachable.
-            if (importBlocked) return;
+            // aria-disabled, not disabled: the title stays reachable, and the click still reaches the panel's
+            // handler so it can say why (Agents shows a toast, the only explanation on touch screens).
             if ("onChange" in importAction) importInputRef.current?.click();
             else importAction.onClick();
           }}
