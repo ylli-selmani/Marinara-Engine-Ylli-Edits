@@ -536,6 +536,7 @@ function applyMaterialBrightnessToLinearGradientStop(stop: string, target: strin
   if (parts.length === 0 || isGradientPositionHint(parts[0]!)) return stop;
 
   const [color, ...positions] = parts;
+  if (!color) return stop;
   return [applyMaterialBrightnessToColor(color, target, mix), ...positions].join(" ");
 }
 

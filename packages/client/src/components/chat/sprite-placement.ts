@@ -59,7 +59,7 @@ export function mirrorCharacterSpritePlacements(
 }
 
 export function getDefaultSpritePlacement(index: number, total: number, side: SpriteSide | "center"): SpritePlacement {
-  const layouts: Record<string, number[][]> = {
+  const layouts: Record<SpriteSide | "center", number[][]> = {
     left: [[26], [22, 42], [18, 34, 50]],
     right: [[74], [58, 78], [50, 66, 82]],
     center: [[50], [35, 65], [25, 50, 75]],
@@ -73,7 +73,8 @@ export function getDefaultSpritePlacement(index: number, total: number, side: Sp
     return clampSpritePlacement({ x, y });
   }
 
-  const byCount = layouts[side][Math.max(0, total - 1)] ?? layouts[side][0];
+  const sideLayouts = layouts[side];
+  const byCount = sideLayouts[Math.max(0, total - 1)] ?? sideLayouts[0] ?? [];
   const x = byCount[index] ?? (side === "left" ? 26 + index * 16 : 74 - index * 16);
   const yOffsets = total >= 3 ? [98, 96, 94] : total === 2 ? [98, 96] : [98];
   const y = yOffsets[index] ?? 98;

@@ -570,10 +570,18 @@ function cropSpriteDataUrl(dataUrl: string, frame: SpriteFrameAdjustments): Prom
 function clampBoundaries(boundaries: number[], minSpan: number): number[] {
   const next = [...boundaries];
   for (let i = 1; i < next.length; i++) {
-    next[i] = Math.max(next[i], next[i - 1] + minSpan);
+    const current = next[i];
+    const previous = next[i - 1];
+    if (current !== undefined && previous !== undefined) {
+      next[i] = Math.max(current, previous + minSpan);
+    }
   }
   for (let i = next.length - 2; i >= 0; i--) {
-    next[i] = Math.min(next[i], next[i + 1] - minSpan);
+    const current = next[i];
+    const following = next[i + 1];
+    if (current !== undefined && following !== undefined) {
+      next[i] = Math.min(current, following - minSpan);
+    }
   }
   return next;
 }

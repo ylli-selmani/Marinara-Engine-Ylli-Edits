@@ -518,6 +518,8 @@ export function AppShell({
   const closeSpatialMapDetail = useUIStore((s) => s.closeSpatialMapDetail);
   const debugMode = useUIStore((s) => s.debugMode);
   const setEditorDirty = useUIStore((s) => s.setEditorDirty);
+  const openCharacterDetail = useUIStore((s) => s.openCharacterDetail);
+  const openPersonaDetail = useUIStore((s) => s.openPersonaDetail);
   const openLorebookDetail = useUIStore((s) => s.openLorebookDetail);
   const closeAgentDetail = useUIStore((s) => s.closeAgentDetail);
   const closeAllDetails = useUIStore((s) => s.closeAllDetails);
@@ -532,11 +534,23 @@ export function AppShell({
     [queryClient],
   );
   const openSpatialLorebook = useCallback(
-    (lorebookId: string) => {
+    (lorebookId: string, entryId?: string) => {
       void refreshLorebooks();
-      openLorebookDetail(lorebookId);
+      openLorebookDetail(lorebookId, entryId ? { entryId } : undefined);
     },
     [openLorebookDetail, refreshLorebooks],
+  );
+  const openCapabilityCharacter = useCallback(
+    (characterId: string) => {
+      openCharacterDetail(characterId);
+    },
+    [openCharacterDetail],
+  );
+  const openCapabilityPersona = useCallback(
+    (personaId: string) => {
+      openPersonaDetail(personaId);
+    },
+    [openPersonaDetail],
   );
   const closeFeatureDetail = useCallback(() => {
     // Popping back to another surface leaves the agents panel out of sight, so it only opens when nothing was popped.
@@ -972,6 +986,8 @@ export function AppShell({
           confirmAction: showConfirmDialog,
           onDirtyChange: setEditorDirty,
           onOpenLorebook: openSpatialLorebook,
+          onOpenCharacter: openCapabilityCharacter,
+          onOpenPersona: openCapabilityPersona,
           onLorebooksChanged: refreshLorebooks,
           onOpenChatSummarySettings: activeChat?.mode === "roleplay" ? openChatSummarySettings : undefined,
           onOpenActivePromptPresetEditor: activeChat?.promptPresetId ? openActivePromptPresetEditor : undefined,

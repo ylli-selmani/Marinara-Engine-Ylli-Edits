@@ -29,6 +29,10 @@ import { Tabs } from "../components/ui/Tabs";
 import { SearchInput } from "../components/ui/SearchInput";
 import { Select } from "../components/ui/Select";
 import { Popover } from "../components/ui/Popover";
+import { CharacterSelect } from "../components/characters/CharacterSelect";
+import { LorebookListField, LorebookPickerField, LorebookPickerWindow } from "../components/ui/LibraryPickers";
+import { PickerField, PickerListField, PickerListWindow } from "../components/ui/PickerField";
+import { FloatingWindow } from "../components/ui/FloatingWindow";
 import { showConfirmDialog } from "./app-dialogs";
 import { useAgentStore } from "../stores/agent.store";
 import { useRollingBackfillStore } from "../stores/backfill.store";
@@ -127,6 +131,14 @@ function defineMarinaraHost(): MarinaraHostV1 {
       Tabs,
       SearchInput,
       Popover,
+      CharacterSelect,
+      LorebookPickerField,
+      LorebookListField,
+      LorebookPickerWindow,
+      PickerField,
+      PickerListField,
+      PickerListWindow,
+      FloatingWindow,
       showConfirmDialog,
     }),
     data: Object.freeze({ emojiCatalog }),

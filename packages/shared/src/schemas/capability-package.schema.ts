@@ -1651,7 +1651,11 @@ const capabilityPackageManifestBaseSchema = z
 // 1.837: how a ruleset sheet shows a skill's or save's rank (`sheet.rankDisplay`: its check value, its tier's
 //        name, dots, Roman numerals or its number). Not a soft seam: an Engine that cannot read it refuses the
 //        whole ruleset file. No permission.
-export const supportedCapabilityApi = Object.freeze({ major: 1, minor: 837 } as const);
+// 1.838: the host's `components` gain the shared searchable pickers (`CharacterSelect`, `LorebookPickerField`,
+//        `LorebookListField`, `LorebookPickerWindow`, `PickerField`, `PickerListField`, `PickerListWindow`) and
+//        `FloatingWindow`. Agent detail pages also receive `onOpenCharacter(id)`, `onOpenPersona(id)` and optional
+//        `entryId` on `onOpenLorebook(lorebookId, entryId?)`. Not a soft seam, as 1.830. No permission.
+export const supportedCapabilityApi = Object.freeze({ major: 1, minor: 838 } as const);
 
 const capabilityApiVersionSchema = z
   .object({

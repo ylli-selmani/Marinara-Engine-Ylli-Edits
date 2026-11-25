@@ -156,6 +156,22 @@ export interface MarinaraHostV1 {
     /** Capability API 1.836. A layer anchored to `anchorRef`: `open`, `onClose`, `side`, `align`; flips, stays inside
      *  the window, and closes on Escape, an outside press and back, topmost layer first. */
     readonly Popover: typeof import("../components/ui/Popover").Popover;
+    /** Capability API 1.838. The shared character and persona picker (`kind`, `multiple`, `variant`, `value`, `onChange`). */
+    readonly CharacterSelect: typeof import("../components/characters/CharacterSelect").CharacterSelect;
+    /** Capability API 1.838. The shared single-lorebook searchable picker field. */
+    readonly LorebookPickerField: typeof import("../components/ui/LibraryPickers").LorebookPickerField;
+    /** Capability API 1.838. The shared multi-lorebook searchable field with selected list and saved-set support. */
+    readonly LorebookListField: typeof import("../components/ui/LibraryPickers").LorebookListField;
+    /** Capability API 1.838. The shared lorebook picker window anchored to `anchorRef`. */
+    readonly LorebookPickerWindow: typeof import("../components/ui/LibraryPickers").LorebookPickerWindow;
+    /** Capability API 1.838. The generic single-item searchable picker field over foldered lists. */
+    readonly PickerField: typeof import("../components/ui/PickerField").PickerField;
+    /** Capability API 1.838. The generic multi-item searchable picker field over foldered lists. */
+    readonly PickerListField: typeof import("../components/ui/PickerField").PickerListField;
+    /** Capability API 1.838. The generic multi-item searchable picker window anchored to `anchorRef`. */
+    readonly PickerListWindow: typeof import("../components/ui/PickerField").PickerListWindow;
+    /** Capability API 1.838. The shared floating window (move, resize, pin, lock, minimize bubble, pop out). */
+    readonly FloatingWindow: typeof import("../components/ui/FloatingWindow").FloatingWindow;
   };
   readonly data: { readonly emojiCatalog: typeof import("./emoji-catalog.generated") };
   /** The module namespace of lib/api-client.ts (api, ApiError, getApiErrorMessage, ...). */

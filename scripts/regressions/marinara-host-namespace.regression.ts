@@ -37,6 +37,25 @@ const MEMBERS = [
   "api",
 ] as const;
 const STORE_NAMES = ["ui", "chat", "agent", "sidecar", "dialog", "gallery", "encounter", "gameState", "backfill"];
+const COMPONENT_NAMES = [
+  "Modal",
+  "Switch",
+  "Checkbox",
+  "Spinner",
+  "showConfirmDialog",
+  "Select",
+  "Tabs",
+  "SearchInput",
+  "Popover",
+  "CharacterSelect",
+  "LorebookPickerField",
+  "LorebookListField",
+  "LorebookPickerWindow",
+  "PickerField",
+  "PickerListField",
+  "PickerListWindow",
+  "FloatingWindow",
+] as const;
 const MODULE_SPECIFIERS = [
   "react",
   "react/jsx-runtime",
@@ -78,10 +97,7 @@ const typesMatch: [
   Equal<keyof MarinaraHostV1["stores"], (typeof MARINARA_HOST_STORE_NAMES)[number]>,
   Equal<keyof MarinaraHostV1["modules"], MarinaraHostModuleSpecifier>,
   Equal<keyof MarinaraHostV1["services"], "tts" | "dialogs" | "audio" | "imageDownloads">,
-  Equal<
-    keyof MarinaraHostV1["components"],
-    "Modal" | "Switch" | "Checkbox" | "Spinner" | "showConfirmDialog" | "Select" | "Tabs" | "SearchInput" | "Popover"
-  >,
+  Equal<keyof MarinaraHostV1["components"], (typeof COMPONENT_NAMES)[number]>,
   Equal<keyof MarinaraHostV1["data"], "emojiCatalog">,
   Equal<keyof MarinaraHostStoreFields, (typeof MARINARA_HOST_STORE_NAMES)[number]>,
 ] = [true, true, true, true, true, true, true];
@@ -198,6 +214,8 @@ const undocumented = [
   ...Object.values(MARINARA_HOST_STORE_FIELDS).flat(),
 ].filter((name) => !documented(name));
 assert.deepEqual(undocumented, [], "every member, store, field, module and Engine key is in the docs");
+const undocumentedComponents = COMPONENT_NAMES.filter((name) => !section.includes(`\`components.${name}\``));
+assert.deepEqual(undocumentedComponents, [], "every components member is in the docs");
 for (const [name, major] of Object.entries(MARINARA_HOST_MODULE_MAJORS)) {
   assert.ok(section.includes(`\`${name}\` ${major}`), `the docs give ${name}'s major as ${major}`);
 }

@@ -393,10 +393,10 @@ export function useChatAgents({
   }, [closeForSurface, openAgentCatalog, openRightPanel]);
   const refreshLorebooks = useCallback(() => qc.invalidateQueries({ queryKey: lorebookKeys.all }), [qc]);
   const openLorebookFromSettings = useCallback(
-    (lorebookId: string) => {
+    (lorebookId: string, entryId?: string) => {
       void refreshLorebooks();
       closeForSurface();
-      openLorebookDetail(lorebookId);
+      openLorebookDetail(lorebookId, entryId ? { entryId } : undefined);
     },
     [closeForSurface, openLorebookDetail, refreshLorebooks],
   );
