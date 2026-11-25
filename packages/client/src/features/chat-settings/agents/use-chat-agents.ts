@@ -396,7 +396,7 @@ export function useChatAgents({
     (lorebookId: string, entryId?: string) => {
       void refreshLorebooks();
       closeForSurface();
-      openLorebookDetail(lorebookId, entryId ? { entryId } : undefined);
+      openLorebookDetail(lorebookId, entryId ? { initialTab: "entries", entryId } : undefined);
     },
     [closeForSurface, openLorebookDetail, refreshLorebooks],
   );

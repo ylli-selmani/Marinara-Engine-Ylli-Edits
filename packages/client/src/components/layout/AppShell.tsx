@@ -536,7 +536,7 @@ export function AppShell({
   const openSpatialLorebook = useCallback(
     (lorebookId: string, entryId?: string) => {
       void refreshLorebooks();
-      openLorebookDetail(lorebookId, entryId ? { entryId } : undefined);
+      openLorebookDetail(lorebookId, entryId ? { initialTab: "entries", entryId } : undefined);
     },
     [openLorebookDetail, refreshLorebooks],
   );
