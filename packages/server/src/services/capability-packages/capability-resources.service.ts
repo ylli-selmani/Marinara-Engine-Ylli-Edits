@@ -7,6 +7,9 @@ import type {
   CapabilityCharacterSummary,
   CapabilityLorebookCreateInput,
   CapabilityLorebookEntryInput,
+  CapabilityLorebookEntryPatch,
+  CapabilityLorebookEntryRow,
+  CapabilityLorebookSummary,
   CapabilityLorebookEntryRecord,
   CapabilityLorebookEntrySelection,
   CapabilityLorebookRecord,
@@ -16,9 +19,11 @@ import type {
   CapabilityPersonaUpdateInput,
   CapabilityResourceHost,
 } from "@marinara-engine/shared";
+import { createLorebookEntrySchema, updateLorebookEntrySchema } from "@marinara-engine/shared";
 import type { DB } from "../../db/connection.js";
 import { createCharactersStorage } from "../storage/characters.storage.js";
 import { createLorebooksStorage } from "../storage/lorebooks.storage.js";
+import { syncCharacterBookFromLorebook } from "../lorebook/character-book-sync.js";
 import { LIBRARY_PAGE_LIMIT } from "../../utils/list-pagination.js";
 
 type LorebookEntrySource = {
@@ -31,6 +36,23 @@ type LorebookEntrySource = {
 
 function uniqueStrings(values: string[]): string[] {
   return Array.from(new Set(values.map((value) => value.trim()).filter((value) => value.length > 0)));
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function stringRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).filter(
+      (pair): pair is [string, string] => typeof pair[1] === "string",
+    ),
+  );
+}
+
+function entryRow(entry: Record<string, unknown>): CapabilityLorebookEntryRow {
+  return { id: String(entry.id), lorebookId: String(entry.lorebookId), data: entry };
 }
 
 function characterRow(row: CapabilityCharacterRow): CapabilityCharacterRow {
@@ -134,6 +156,49 @@ export function createCapabilityResourceHost(db: DB, permissions: readonly strin
       );
     },
 
+    async listLorebookSummaries(lorebookIds): Promise<CapabilityLorebookSummary[]> {
+      const requestedIds = lorebookIds ? uniqueStrings(lorebookIds) : null;
+      const records = (
+        requestedIds
+          ? await Promise.all(requestedIds.map((lorebookId) => lorebooks.getById(lorebookId)))
+          : await lorebooks.list()
+      ) as Array<Record<string, unknown> | null>;
+      const books = records.filter((record): record is Record<string, unknown> => Boolean(record));
+      const entries = (await lorebooks.listEntriesByLorebooks(
+        books.map((book) => String(book.id)),
+      )) as unknown as Array<Record<string, unknown>>;
+      const entriesByBook = new Map<string, CapabilityLorebookSummary["entries"]>();
+      for (const entry of entries) {
+        const lorebookId = String(entry.lorebookId);
+        const list = entriesByBook.get(lorebookId) ?? [];
+        list.push({
+          id: String(entry.id),
+          lorebookId,
+          name: typeof entry.name === "string" ? entry.name : "",
+          description: typeof entry.description === "string" ? entry.description : "",
+          tag: typeof entry.tag === "string" ? entry.tag : "",
+          keys: stringArray(entry.keys),
+          secondaryKeys: stringArray(entry.secondaryKeys),
+          enabled: entry.enabled !== false,
+          constant: entry.constant === true,
+          locked: entry.locked === true,
+          relationships: stringRecord(entry.relationships),
+          updatedAt: typeof entry.updatedAt === "string" ? entry.updatedAt : "",
+        });
+        entriesByBook.set(lorebookId, list);
+      }
+      return books.map((book) => ({
+        id: String(book.id),
+        name: typeof book.name === "string" ? book.name : "",
+        description: typeof book.description === "string" ? book.description : "",
+        category: typeof book.category === "string" ? book.category : "uncategorized",
+        enabled: book.enabled !== false,
+        isGlobal: book.isGlobal === true,
+        tokenBudget: typeof book.tokenBudget === "number" ? book.tokenBudget : null,
+        entries: entriesByBook.get(String(book.id)) ?? [],
+      }));
+    },
+
     async listEligibleLorebookEntries(
       selection: CapabilityLorebookEntrySelection,
     ): Promise<CapabilityLorebookEntryRecord[]> {
@@ -198,6 +263,40 @@ export function createCapabilityResourceHost(db: DB, permissions: readonly strin
 
     async bulkCreateLorebookEntries(lorebookId: string, entries: CapabilityLorebookEntryInput[]): Promise<void> {
       await lorebooks.bulkCreateEntries(lorebookId, entries);
+    },
+
+    async createLorebookEntry(
+      lorebookId: string,
+      entry: CapabilityLorebookEntryInput,
+    ): Promise<CapabilityLorebookEntryRow> {
+      if (!(await lorebooks.getById(lorebookId))) throw new Error(`[capability] Lorebook ${lorebookId} not found`);
+      const input = createLorebookEntrySchema.parse({ ...entry, lorebookId });
+      const created = await db.transaction(async (tx) => {
+        const record = await createLorebooksStorage(tx).createEntry(input);
+        await syncCharacterBookFromLorebook(tx, lorebookId, { throwOnError: true });
+        return record;
+      });
+      if (!created) throw new Error("[capability] createLorebookEntry failed");
+      return entryRow(created as unknown as Record<string, unknown>);
+    },
+
+    async updateLorebookEntry(
+      entryId: string,
+      patch: CapabilityLorebookEntryPatch,
+    ): Promise<CapabilityLorebookEntryRow | null> {
+      const existing = (await lorebooks.getEntry(entryId)) as unknown as Record<string, unknown> | null;
+      if (!existing) return null;
+      const input = updateLorebookEntrySchema.parse(patch);
+      const changedKeys = Object.entries(input).flatMap(([key, value]) => (value === undefined ? [] : [key]));
+      const onlyUnlocks = changedKeys.length === 1 && changedKeys[0] === "locked" && input.locked === false;
+      if (existing.locked === true && !onlyUnlocks) throw new Error("[capability] Lorebook entry is locked");
+      const lorebookId = String(existing.lorebookId);
+      const updated = await db.transaction(async (tx) => {
+        const record = await createLorebooksStorage(tx).updateEntry(entryId, input);
+        if (record) await syncCharacterBookFromLorebook(tx, lorebookId, { throwOnError: true });
+        return record;
+      });
+      return updated ? entryRow(updated as unknown as Record<string, unknown>) : null;
     },
 
     async removeLorebookEntry(entryId: string): Promise<void> {

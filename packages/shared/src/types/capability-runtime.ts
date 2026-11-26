@@ -216,6 +216,62 @@ export interface CapabilityLorebookEntryInput {
   [key: string]: unknown;
 }
 
+/** Capability API 1.839. One entry without its content: what routing, graphs and a librarian pass read. */
+export interface CapabilityLorebookEntrySummary {
+  id: string;
+  lorebookId: string;
+  name: string;
+  /** The short routing summary. */
+  description: string;
+  tag: string;
+  keys: string[];
+  secondaryKeys: string[];
+  enabled: boolean;
+  constant: boolean;
+  locked: boolean;
+  /** Bare entry ids or typed `<kind>:<id>` references (see `parseEntityRef`) mapped to a relation. */
+  relationships: Record<string, string>;
+  updatedAt: string;
+}
+
+/** Capability API 1.839. A lorebook's settings with its entries as summaries. */
+export interface CapabilityLorebookSummary {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  enabled: boolean;
+  isGlobal: boolean;
+  tokenBudget: number | null;
+  entries: CapabilityLorebookEntrySummary[];
+}
+
+/** Capability API 1.839. A stored entry as the Engine returns it (`data` is the full parsed entry). */
+export interface CapabilityLorebookEntryRow {
+  id: string;
+  lorebookId: string;
+  data: Record<string, unknown>;
+}
+
+/**
+ * Capability API 1.839. Fields a package may change on one entry. Validated by the same schema as the lorebook
+ * editor's own save: a malformed field throws, an unknown one is dropped.
+ */
+export interface CapabilityLorebookEntryPatch {
+  name?: string;
+  content?: string;
+  description?: string;
+  keys?: string[];
+  secondaryKeys?: string[];
+  tag?: string;
+  enabled?: boolean;
+  constant?: boolean;
+  locked?: boolean;
+  relationships?: Record<string, string>;
+  dynamicState?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
 export interface CapabilityResourceHost {
   listCharacters(characterIds?: string[]): Promise<CapabilityCharacterRecord[]>;
   listPersonas(personaIds?: string[]): Promise<CapabilityPersonaRecord[]>;
@@ -231,6 +287,21 @@ export interface CapabilityResourceHost {
   updateLorebook?(lorebookId: string, updates: CapabilityLorebookUpdateInput): Promise<void>;
   bulkCreateLorebookEntries?(lorebookId: string, entries: CapabilityLorebookEntryInput[]): Promise<void>;
   removeLorebookEntry?(entryId: string): Promise<void>;
+  // Capability API 1.839: entry-level reads and writes for packages that manage lorebooks (the Lorebook Manager).
+  // Optional like the writes above. Writes go through the same validation and embedded-character-book sync as the
+  // lorebook editor's saves.
+  /** Lorebooks with their entries as summaries (no content). No ids lists every lorebook. Unknown ids are left out. */
+  listLorebookSummaries?(lorebookIds?: string[]): Promise<CapabilityLorebookSummary[]>;
+  /** Create one entry and return it, id included. Throws when the lorebook does not exist. */
+  createLorebookEntry?(lorebookId: string, entry: CapabilityLorebookEntryInput): Promise<CapabilityLorebookEntryRow>;
+  /**
+   * Change one entry. A locked entry is refused unless the patch only unlocks it, so a package agent can't overwrite
+   * what the user locked. Resolves the updated entry, or null for an unknown id.
+   */
+  updateLorebookEntry?(
+    entryId: string,
+    patch: CapabilityLorebookEntryPatch,
+  ): Promise<CapabilityLorebookEntryRow | null>;
   // Capability API 1.819: characters as packages use them. Optional like the writes above; a package checks for
   // them, because `listCharacters` is older and an older Engine would answer it without these fields.
   /** Full rows. No ids lists every character, most recently updated first. Unknown ids are left out. */
