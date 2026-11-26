@@ -67,6 +67,9 @@ try {
   });
   const asyncRelease = registerCapabilityLorebookClaims("async", (() =>
     Promise.resolve([plain.id])) as unknown as Parameters<typeof registerCapabilityLorebookClaims>[1]);
+  // A rejected promise must be swallowed, not left as an unhandled rejection that crashes the server.
+  const rejectingRelease = registerCapabilityLorebookClaims("rejecting", (() =>
+    Promise.reject(new Error("late boom"))) as unknown as Parameters<typeof registerCapabilityLorebookClaims>[1]);
 
   assert.deepEqual(collectCapabilityLorebookClaims({ chatId: "chat-1", chatMode: "roleplay", chatMeta: {} }), {
     lorebookIds: [managed.id],
@@ -95,6 +98,7 @@ try {
   release();
   brokenRelease();
   asyncRelease();
+  rejectingRelease();
   const released = await scan("chat-1");
   assert.deepEqual(released.activatedEntryIds.sort(), [court.id, hall.id, rain.id].sort(), "released with the package");
 
@@ -107,6 +111,8 @@ try {
     [plain.id],
   );
 
+  // Let a swallowed rejection settle before the process could report it as unhandled.
+  await new Promise((resolve) => setTimeout(resolve, 20));
   console.log("capability-lorebook-claims regression passed");
 } finally {
   await closeDB();

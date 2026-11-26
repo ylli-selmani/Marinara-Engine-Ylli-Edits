@@ -1909,6 +1909,12 @@ prompt-context contributor, so they aren't injected twice.
   chat bindings). A resolver that throws or returns a promise claims nothing.
 - Nothing is written to the chat. Claims end when the package is disabled or uninstalled, and they don't apply in
   hosted multiplayer rooms, where package context doesn't run.
+- Claims apply to the scans that build the prompt (generation, Peek Prompt, retries, the lorebook test scan) and
+  to the lorebook context agents read there. They don't hide a book from membership checks, `{{include::}}`,
+  agent lorebook triggers, or entries the user picks explicitly (Game setup, Game lore picks).
+- The scan runs before contributors, so a claimed book is injected only by the package. If its contributor fails
+  or times out, those books are missing for that turn: keep the claim's share of the work local and fast, and
+  return the local result when an optional model call fails.
 - The chat's Lorebooks section shows "Handled by <package name>" on a claimed book.
   `GET /api/chats/:id/lorebook-claims` returns `{ claims: [{ packageId, packageName, lorebookIds }] }`.
 

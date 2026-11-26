@@ -284,15 +284,17 @@ export function createCapabilityResourceHost(db: DB, permissions: readonly strin
       entryId: string,
       patch: CapabilityLorebookEntryPatch,
     ): Promise<CapabilityLorebookEntryRow | null> {
-      const existing = (await lorebooks.getEntry(entryId)) as unknown as Record<string, unknown> | null;
-      if (!existing) return null;
       const input = updateLorebookEntrySchema.parse(patch);
       const changedKeys = Object.entries(input).flatMap(([key, value]) => (value === undefined ? [] : [key]));
       const onlyUnlocks = changedKeys.length === 1 && changedKeys[0] === "locked" && input.locked === false;
-      if (existing.locked === true && !onlyUnlocks) throw new Error("[capability] Lorebook entry is locked");
-      const lorebookId = String(existing.lorebookId);
       const updated = await db.transaction(async (tx) => {
-        const record = await createLorebooksStorage(tx).updateEntry(entryId, input);
+        const storage = createLorebooksStorage(tx);
+        // Read inside the transaction, so a lock saved just before this write still refuses it.
+        const existing = (await storage.getEntry(entryId)) as unknown as Record<string, unknown> | null;
+        if (!existing) return null;
+        if (existing.locked === true && !onlyUnlocks) throw new Error("[capability] Lorebook entry is locked");
+        const lorebookId = String(existing.lorebookId);
+        const record = await storage.updateEntry(entryId, input);
         if (record) await syncCharacterBookFromLorebook(tx, lorebookId, { throwOnError: true });
         return record;
       });

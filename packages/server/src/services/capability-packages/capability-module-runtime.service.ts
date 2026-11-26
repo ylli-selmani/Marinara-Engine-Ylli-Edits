@@ -448,6 +448,10 @@ class CapabilityModuleRuntime {
                 `Capability package ${installed.id} must declare the "prompt-context" permission to claim lorebooks`,
               );
             }
+            // A stale claim would keep hiding books from the scan with no package left to inject them.
+            if (!activationLive) {
+              throw new Error(`Capability package ${installed.id} cannot claim lorebooks after its activation ended`);
+            }
             return trackCleanup(registerCapabilityLorebookClaims(installed.id, resolver, installed.manifest.name));
           },
           registerTool: (registration) => {

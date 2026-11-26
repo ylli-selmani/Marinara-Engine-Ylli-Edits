@@ -1796,7 +1796,7 @@ async function buildRetryAgentContext(args: {
   }
 
   if (agentsWithLorebookTriggers.length > 0) {
-    const lorebookScopeExclusions = resolveLorebookScopeExclusions(chat.mode, chatMeta, { chatId });
+    const lorebookScopeExclusions = resolveLorebookScopeExclusions(chat.mode, chatMeta);
     const scopedLorebookIds = new Set(
       filterRelevantLorebooks((await lorebooksStore.list()) as unknown as Lorebook[], {
         chatId,

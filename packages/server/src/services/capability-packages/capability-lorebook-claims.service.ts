@@ -55,7 +55,20 @@ export function collectCapabilityLorebookClaims(request: CapabilityLorebookClaim
   const byPackage: CapabilityLorebookClaims["byPackage"] = [];
   for (const [packageId, { resolve, packageName }] of resolversByPackage) {
     try {
-      const claimed = resolve(request);
+      const claimed: unknown = resolve(request);
+      if (claimed && typeof (claimed as PromiseLike<unknown>).then === "function") {
+        // Resolvers must be synchronous. Swallow a late rejection so it can't crash the server, and claim nothing.
+        Promise.resolve(claimed).catch((error: unknown) =>
+          logRateLimited(
+            "warn",
+            `lorebook-claims:${packageId}`,
+            error,
+            "[capability] async lorebook claim resolver rejected for %s",
+            packageId,
+          ),
+        );
+        continue;
+      }
       if (!Array.isArray(claimed)) continue;
       const ids = [
         ...new Set(

@@ -12775,7 +12775,7 @@
   "ui.chatSettings.lorebookssection.disableInThisChat": "Disable in this chat",
   "ui.chatSettings.lorebookssection.enableInThisChat": "Enable in this chat",
   "ui.chatSettings.lorebookssection.handledByPackage": "Handled by {{name}}",
-  "ui.chatSettings.lorebookssection.handledByPackageHint": "This package picks and injects this lorebook's entries itself, so the normal lorebook scan skips it in this chat.",
+  "ui.chatSettings.lorebookssection.handledByPackageHint": "This package picks the entries from this lorebook itself, so they aren't added a second time.",
   "ui.chatSettings.lorebookssection.lorebooksContainWorldInfoCharacterBackstoriesAndLoreThat": "Lorebooks hold world info, backstories, and lore. The AI gets an entry when its keywords come up in the chat.",
   "ui.chatSettings.lorebookssection.lorebookTokenBudget": "Lorebook Token Budget",
   "ui.chatSettings.lorebookssection.noLorebooksActiveInThisChat": "No lorebooks active in this chat.",
