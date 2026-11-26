@@ -33,7 +33,7 @@ import {
 import { useUIStore, type LorebookPanelCategory, type LorebookPanelSort } from "../../stores/ui.store";
 import { sortFoldersByTokens, sortItemsByTokens, sortPanelFolders } from "../../lib/panel-sort";
 import { formatEstimatedTokens } from "../../lib/character-token-count";
-import { isTokenSort } from "@marinara-engine/shared";
+import { isTokenSort, remapEntryRelationships } from "@marinara-engine/shared";
 import { useChatStore } from "../../stores/chat.store";
 import {
   fetchAllLorebookPages,
@@ -111,21 +111,6 @@ function usePanelMobileOverlay() {
   }, []);
 
   return isMobileOverlay;
-}
-
-function remapLorebookEntryRelationships(
-  relationships: Record<string, string> | null | undefined,
-  entryIdMap: Map<string, string>,
-) {
-  const remapped: Record<string, string> = {};
-  if (!relationships) return remapped;
-
-  for (const [sourceEntryId, relationshipType] of Object.entries(relationships)) {
-    const clonedEntryId = entryIdMap.get(sourceEntryId);
-    if (clonedEntryId) remapped[clonedEntryId] = relationshipType;
-  }
-
-  return remapped;
 }
 
 export function LorebooksPanel() {
@@ -515,7 +500,7 @@ export function LorebooksPanel() {
               const createdEntry = createdEntries[index];
               if (!createdEntry) return null;
 
-              const relationships = remapLorebookEntryRelationships(entry.relationships, entryIdMap);
+              const relationships = remapEntryRelationships(entry.relationships, entryIdMap);
               if (Object.keys(relationships).length === 0) return null;
 
               return api.patch<LorebookEntry>(`/lorebooks/${createdId}/entries/${createdEntry.id}`, { relationships });
