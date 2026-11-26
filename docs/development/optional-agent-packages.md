@@ -352,6 +352,8 @@ the contributor which agent-data sections the preset already placed, so it can a
 duplicating its context. The host retains each contribution's package identity in
 `packageBlocks` to place package-owned text at the corresponding agent section. A
 contributor returning audience-specific text should respect the supplied target character IDs.
+From capability API 1.839, `api.registerPromptContext(contributor, { timeoutMs })` may ask for a longer deadline
+than the default 2 s, up to 15 s (see [Capability API 1.839](#capability-api-1839-lorebook-management-for-packages)).
 
 A server entrypoint may also register its own post-processing lifecycle service through
 `api.registerService("agent-runtime:<package-id>", service)`. It needs the `agent-runtime`
@@ -1880,6 +1882,45 @@ providers that cache on their own (OpenAI, Gemini, xAI, DeepSeek) and Claude (Su
 connection's cache time applies.
 
 Older Engines ignore the option, so a package can always pass it. Declare 1.815 when the package relies on it.
+
+### Capability API 1.839: lorebook management for packages
+
+For packages that manage lorebooks themselves, such as the Lorebook Manager: its graph, its retrieval and its
+post-turn updater.
+
+**Entry reads and writes** on `api.runtime.resources` (all optional, so feature-detect them):
+
+- `listLorebookSummaries(lorebookIds?)` returns lorebooks with their entries as summaries: `name`, `description`,
+  `tag`, `keys`, `secondaryKeys`, `enabled`, `constant`, `locked`, `relationships` and `updatedAt`, with no
+  content. Use it for routing, graphs and a cheap model pass over many entries.
+- `createLorebookEntry(lorebookId, entry)` creates one entry and returns it, id included.
+- `updateLorebookEntry(entryId, patch)` changes only the fields the patch names and returns the entry, or `null`
+  for an unknown id. A locked entry is refused unless the patch only unlocks it.
+- Both writes are validated by the lorebook editor's schema (a malformed field throws, an unknown one is dropped)
+  and keep a character's embedded book in sync, like the editor's own saves.
+
+**Lorebook claims.** `api.registerLorebookClaims(resolver)` needs the `prompt-context` permission. On every scan the
+Engine calls `resolver({ chatId, chatMode, chatMeta })`, and the lorebook ids it returns are skipped by the Engine's
+own scan in that chat. A claimed book drops out however it is attached (chat, character, persona or global), and so
+do its World Maps `current_location` entries. Use it when the package injects those books itself, through its
+prompt-context contributor, so they aren't injected twice.
+
+- The resolver must be synchronous and cheap, so answer from state the package keeps in memory (for example its
+  chat bindings). A resolver that throws or returns a promise claims nothing.
+- Nothing is written to the chat. Claims end when the package is disabled or uninstalled, and they don't apply in
+  hosted multiplayer rooms, where package context doesn't run.
+- The chat's Lorebooks section shows "Handled by <package name>" on a claimed book.
+  `GET /api/chats/:id/lorebook-claims` returns `{ claims: [{ packageId, packageName, lorebookIds }] }`.
+
+**Longer contributor deadline.** `api.registerPromptContext(contributor, { timeoutMs })` may ask for a deadline
+between the default 2 s and 15 s, for a contributor that makes one model call over its candidates. Every second
+delays the reply, so return a local fallback when the call runs long, and ask only for what it needs.
+
+**EntityRef.** `LorebookEntry.relationships` keys are bare entry ids, or typed `<kind>:<id>` references to other
+things: `char:`, `persona:`, `book:`, `loc:`, `npc:`, `item:`, `itemdef:`, `lore:`. `@marinara-engine/shared`
+exports `parseEntityRef`, `formatEntityRef`, `toRelationshipKey` (store entries bare, everything else typed) and
+`remapEntryRelationships`. Duplicating a lorebook now remaps links between its own entries and keeps every other
+link, where it used to drop card, persona and cross-book links.
 
 ### Capability API 1.838: host pickers, floating window, and editor deep-links
 

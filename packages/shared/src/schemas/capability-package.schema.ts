@@ -1655,7 +1655,14 @@ const capabilityPackageManifestBaseSchema = z
 //        `LorebookListField`, `LorebookPickerWindow`, `PickerField`, `PickerListField`, `PickerListWindow`) and
 //        `FloatingWindow`. Agent detail pages also receive `onOpenCharacter(id)`, `onOpenPersona(id)` and optional
 //        `entryId` on `onOpenLorebook(lorebookId, entryId?)`. Not a soft seam, as 1.830. No permission.
-export const supportedCapabilityApi = Object.freeze({ major: 1, minor: 838 } as const);
+// 1.839: lorebook management for packages. `resources` gains `listLorebookSummaries`, `createLorebookEntry` and
+//        `updateLorebookEntry` (validated and synced like the editor's saves, locked entries refused);
+//        `api.registerLorebookClaims(resolver)` lets a package that injects some lorebooks itself have the Engine's
+//        scan skip them in a chat (requires `prompt-context`); `api.registerPromptContext(fn, { timeoutMs })` may
+//        ask for up to 15 s. Shared `EntityRef` helpers name relationship targets (`char:`, `persona:`, `book:`,
+//        `loc:`), and duplicating a lorebook keeps those links. Soft seam: the resource methods are optional and the
+//        others feature-detect, so a package declares 1.839 only when it cannot work without them.
+export const supportedCapabilityApi = Object.freeze({ major: 1, minor: 839 } as const);
 
 const capabilityApiVersionSchema = z
   .object({
