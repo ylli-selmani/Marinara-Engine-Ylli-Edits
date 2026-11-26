@@ -63,6 +63,7 @@ import {
   registerCapabilityPromptContext,
   withDeadline,
   type CapabilityPromptContextContributor,
+  type CapabilityPromptContextOptions,
 } from "./capability-prompt-context.service.js";
 import {
   registerCapabilityLorebookClaims,
@@ -98,7 +99,10 @@ type CapabilityActivationContext = {
     /** `hostOnly` (Capability API 1.388) keeps the service from `runtime.services.get`; only the Engine reads it. */
     registerService<T>(key: string, service: T, options?: { hostOnly?: boolean }): Cleanup;
     /** Contribute text to each turn's system prompt. Requires the `prompt-context` permission. */
-    registerPromptContext(contributor: CapabilityPromptContextContributor): Cleanup;
+    registerPromptContext(
+      contributor: CapabilityPromptContextContributor,
+      options?: CapabilityPromptContextOptions,
+    ): Cleanup;
     registerLorebookClaims(resolver: CapabilityLorebookClaimResolver): Cleanup;
     /** Offer the model a tool this package handles. Requires the `tools` permission. */
     registerTool(registration: CapabilityToolRegistration): Cleanup;
@@ -428,13 +432,13 @@ class CapabilityModuleRuntime {
           },
           // Gated on the permission the manifest already declares, so a package can't reach the prompt
           // without asking for it up front. Contract in capability-prompt-context.service.ts.
-          registerPromptContext: (contributor) => {
+          registerPromptContext: (contributor, options) => {
             if (!installed.manifest.permissions?.includes("prompt-context")) {
               throw new Error(
                 `Capability package ${installed.id} must declare the "prompt-context" permission to contribute prompt context`,
               );
             }
-            return trackCleanup(registerCapabilityPromptContext(installed.id, contributor));
+            return trackCleanup(registerCapabilityPromptContext(installed.id, contributor, options));
           },
           // Claims change what the Engine injects, so they ride on the same permission as prompt context.
           // Contract in capability-lorebook-claims.service.ts.

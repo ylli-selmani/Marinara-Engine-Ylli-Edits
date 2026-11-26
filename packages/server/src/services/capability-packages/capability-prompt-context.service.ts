@@ -55,7 +55,23 @@ export interface CapabilityPromptContextResult {
   provides: CapabilityProvidedGameSystems;
 }
 
-const contributorsByPackage = new Map<string, CapabilityPromptContextContributor>();
+/** Registration options for a contributor. */
+export interface CapabilityPromptContextOptions {
+  /**
+   * How long the turn waits for this contributor, in ms. Defaults to {@link CONTRIBUTOR_TIMEOUT_MS}; clamped to
+   * {@link CONTRIBUTOR_MAX_TIMEOUT_MS}. For a contributor that makes one model call (a librarian or reranker pass
+   * over retrieval candidates) and returns its own fallback when that call is slow. Every second here is a second
+   * before the reply starts, so ask only for what the call needs.
+   */
+  timeoutMs?: number;
+}
+
+interface ContributorRegistration {
+  contribute: CapabilityPromptContextContributor;
+  timeoutMs: number;
+}
+
+const contributorsByPackage = new Map<string, ContributorRegistration>();
 
 export function getCapabilityPromptContextPackageIds(): string[] {
   return [...contributorsByPackage.keys()];
@@ -65,17 +81,28 @@ export function getCapabilityPromptContextPackageIds(): string[] {
 export function registerCapabilityPromptContext(
   packageId: string,
   contributor: CapabilityPromptContextContributor,
+  options?: CapabilityPromptContextOptions,
 ): () => void {
   if (typeof contributor !== "function") throw new Error("Capability prompt-context contributor is invalid");
-  contributorsByPackage.set(packageId, contributor);
+  const registration = { contribute: contributor, timeoutMs: resolveContributorTimeout(options?.timeoutMs) };
+  contributorsByPackage.set(packageId, registration);
   return () => {
-    if (contributorsByPackage.get(packageId) === contributor) contributorsByPackage.delete(packageId);
+    if (contributorsByPackage.get(packageId) === registration) contributorsByPackage.delete(packageId);
   };
 }
 
 /** Deadline per contributor. A throw is already non-fatal, but a promise that never settles would hang
  *  the turn, so building the prompt can't wait on one indefinitely. */
 export const CONTRIBUTOR_TIMEOUT_MS = 2_000;
+
+/** The longest a contributor may ask for (capability API 1.839). */
+export const CONTRIBUTOR_MAX_TIMEOUT_MS = 15_000;
+
+/** A requested deadline, clamped to [{@link CONTRIBUTOR_TIMEOUT_MS}, {@link CONTRIBUTOR_MAX_TIMEOUT_MS}]. */
+export function resolveContributorTimeout(requested: unknown): number {
+  if (typeof requested !== "number" || !Number.isFinite(requested)) return CONTRIBUTOR_TIMEOUT_MS;
+  return Math.min(CONTRIBUTOR_MAX_TIMEOUT_MS, Math.max(CONTRIBUTOR_TIMEOUT_MS, Math.floor(requested)));
+}
 
 /**
  * Reject if `value` has not settled within {@link CONTRIBUTOR_TIMEOUT_MS}. A primitive is passed straight
@@ -114,9 +141,13 @@ export async function collectCapabilityPromptContext(
   const provides: CapabilityProvidedGameSystems = {};
   const activeExperienceId =
     typeof request.chatMeta.gameExperienceId === "string" ? request.chatMeta.gameExperienceId : null;
-  for (const [packageId, contribute] of contributorsByPackage) {
+  for (const [packageId, { contribute, timeoutMs }] of contributorsByPackage) {
     try {
-      const contribution = await withDeadline(contribute(request), `prompt-context contributor ${packageId}`);
+      const contribution = await withDeadline(
+        contribute(request),
+        `prompt-context contributor ${packageId}`,
+        timeoutMs,
+      );
       if (contribution === null || contribution === undefined) continue;
       const text = typeof contribution === "string" ? contribution : contribution.text;
       if (typeof text === "string" && text.trim().length > 0) {
