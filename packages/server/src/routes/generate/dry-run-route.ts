@@ -232,7 +232,10 @@ import {
 import { createReplyFallbackNotifier } from "./fallback-notification.js";
 import { resolveGameGmPromptTemplate } from "../../services/generation/game-gm-prompt-runtime.js";
 
-import { injectCapabilityContexts } from "../../services/generation/capability-prompt-runtime.js";
+import {
+  createClaimedLorebookRescan,
+  injectCapabilityContexts,
+} from "../../services/generation/capability-prompt-runtime.js";
 import { getCapabilityPromptContextPackageIds } from "../../services/capability-packages/capability-prompt-context.service.js";
 import { notFound } from "../../utils/not-found.js";
 import { isRecord } from "../../utils/large-json.js";
@@ -2237,6 +2240,22 @@ export async function registerDryRunRoute(app: FastifyInstance) {
       },
       app.db,
       trackerSectionTokens,
+      {
+        rescanClaimedLorebooks: createClaimedLorebookRescan(app.db, {
+          chatId,
+          chatMode,
+          chatMeta,
+          scanMessages: () =>
+            mappedMessages.map((m) => ({ role: m.role as "user" | "assistant" | "system", content: m.content })),
+          characterIds: withIdentityLorebookScope(promptCharacterIds),
+          personaId,
+          activeLorebookIds: Array.isArray(chatMeta.activeLorebookIds) ? (chatMeta.activeLorebookIds as string[]) : [],
+          forcedEntryIds: ownerSpatialLorebookEntryIds,
+          tokenBudget: lorebookTokenBudget,
+          resolveContent: resolvePromptMacrosForLorebook,
+          wrapFormat,
+        }),
+      },
     );
     clearUnusedRuntimeAgentSections(finalMessages, trackerSectionTokens);
 

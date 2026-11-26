@@ -1,6 +1,6 @@
 /**
  * Capability API 1.839: a prompt-context contributor may ask for a longer deadline (for one model call over its
- * retrieval candidates), clamped between the 2 s default and 15 s. One that asks for nothing keeps 2 s.
+ * retrieval candidates), clamped between the 2 s default and 5 s. One that asks for nothing keeps 2 s.
  */
 import assert from "node:assert/strict";
 import {
@@ -29,6 +29,7 @@ const releaseLonger = registerCapabilityPromptContext("longer-deadline", slow("l
 try {
   const result = await collectCapabilityPromptContext({ chatId: "chat-1", chatMeta: {}, mode: "roleplay" });
   assert.deepEqual(result.packageBlocks, [{ packageId: "longer-deadline", text: "librarian picks" }]);
+  assert.deepEqual(result.failedPackageIds, ["default-deadline"], "a timed-out contributor is reported as failed");
 } finally {
   releaseDefault();
   releaseLonger();

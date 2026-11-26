@@ -53,6 +53,8 @@ export interface CapabilityPromptContextResult {
   blocks: string[];
   packageBlocks: Array<{ packageId: string; text: string }>;
   provides: CapabilityProvidedGameSystems;
+  /** Packages whose contributor threw or ran out of time this turn (not ones that returned nothing). */
+  failedPackageIds: string[];
 }
 
 /** Registration options for a contributor. */
@@ -96,7 +98,7 @@ export function registerCapabilityPromptContext(
 export const CONTRIBUTOR_TIMEOUT_MS = 2_000;
 
 /** The longest a contributor may ask for (capability API 1.839). */
-export const CONTRIBUTOR_MAX_TIMEOUT_MS = 15_000;
+export const CONTRIBUTOR_MAX_TIMEOUT_MS = 5_000;
 
 /** A requested deadline, clamped to [{@link CONTRIBUTOR_TIMEOUT_MS}, {@link CONTRIBUTOR_MAX_TIMEOUT_MS}]. */
 export function resolveContributorTimeout(requested: unknown): number {
@@ -135,10 +137,11 @@ export async function collectCapabilityPromptContext(
   request: CapabilityPromptContextRequest,
 ): Promise<CapabilityPromptContextResult> {
   if (currentRoomGeneration() || contributorsByPackage.size === 0)
-    return { blocks: [], packageBlocks: [], provides: {} };
+    return { blocks: [], packageBlocks: [], provides: {}, failedPackageIds: [] };
   const blocks: string[] = [];
   const packageBlocks: Array<{ packageId: string; text: string }> = [];
   const provides: CapabilityProvidedGameSystems = {};
+  const failedPackageIds: string[] = [];
   const activeExperienceId =
     typeof request.chatMeta.gameExperienceId === "string" ? request.chatMeta.gameExperienceId : null;
   for (const [packageId, { contribute, timeoutMs }] of contributorsByPackage) {
@@ -165,6 +168,7 @@ export async function collectCapabilityPromptContext(
         provides.inventory = true;
       }
     } catch (error) {
+      failedPackageIds.push(packageId);
       // Non-fatal by design: a broken contributor costs its own context, not the player's turn.
       // Runs every turn, so a package that keeps failing logs once a minute, with a repeat count.
       logRateLimited(
@@ -176,5 +180,5 @@ export async function collectCapabilityPromptContext(
       );
     }
   }
-  return { blocks, packageBlocks, provides };
+  return { blocks, packageBlocks, provides, failedPackageIds };
 }

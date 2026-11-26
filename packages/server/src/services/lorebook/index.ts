@@ -207,6 +207,8 @@ export interface LorebookBudgetSkippedEntry {
 }
 
 type LorebookFilters = {
+  /** When set, only these lorebooks may take part (still subject to every other gate). */
+  onlyLorebookIds?: string[];
   chatId?: string;
   characterIds?: string[];
   personaId?: string | null;
@@ -363,10 +365,12 @@ export function filterRelevantLorebooks(lorebooks: RelevantLorebook[], filters?:
   if (!filters) return enabledBooks;
 
   const excludedLorebookIds = new Set(filters.excludedLorebookIds ?? []);
+  const onlyLorebookIds = filters.onlyLorebookIds ? new Set(filters.onlyLorebookIds) : null;
   const excludedSourceAgentIds = new Set(filters.excludedSourceAgentIds ?? []);
 
   return enabledBooks.filter((book) => {
     if (excludedLorebookIds.has(book.id)) return false;
+    if (onlyLorebookIds && !onlyLorebookIds.has(book.id)) return false;
     if (book.sourceAgentId && excludedSourceAgentIds.has(book.sourceAgentId)) return false;
     if (book.isGlobal) return true;
     if (activeLorebookMatchesFilters(book, filters)) return true;
@@ -1198,6 +1202,9 @@ export async function processLorebooks(
     activeLorebookIds?: string[];
     excludedLorebookIds?: string[];
     excludedSourceAgentIds?: string[];
+    /** Restrict the scan, forced entries included, to these lorebooks. Used to re-scan the books a capability
+     *  package claimed when that package failed to deliver its own context this turn. */
+    onlyLorebookIds?: string[];
     /** Entries explicitly attached to the exact current hierarchical location. */
     forcedEntryIds?: string[];
     /** Assemble `forcedEntryIds` and NOTHING else: the ordinary scope-based scan is
@@ -1264,6 +1271,7 @@ export async function processLorebooks(
         activeLorebookIds: options.activeLorebookIds,
         excludedLorebookIds: options.excludedLorebookIds,
         excludedSourceAgentIds: options.excludedSourceAgentIds,
+        onlyLorebookIds: options.onlyLorebookIds,
       }
     : undefined;
 
@@ -1280,6 +1288,10 @@ export async function processLorebooks(
     excludedLorebookIds: options?.excludedLorebookIds,
     excludedSourceAgentIds: options?.excludedSourceAgentIds,
   })) as unknown as LorebookEntry[];
+  if (options?.onlyLorebookIds) {
+    const onlyIds = new Set(options.onlyLorebookIds);
+    forcedEntries = forcedEntries.filter((entry) => onlyIds.has(entry.lorebookId));
+  }
   const relevantLorebooks = forcedEntriesOnly ? [] : filterRelevantLorebooks(allLorebooks, filters);
   const forcedLorebookIds = new Set(forcedEntries.map((entry) => entry.lorebookId));
   const effectiveLorebooks = Array.from(
@@ -1301,9 +1313,10 @@ export async function processLorebooks(
   // Under an exact selection there is no ordinary set to merge with: allEntries is
   // the forced entries alone, which is what keeps unpicked content out of the
   // keyword scan, out of the recursion pool and out of the budgets below.
-  const normallyActiveEntries = forcedEntriesOnly
-    ? []
-    : ((await storage.listActiveEntries(filters)) as unknown as LorebookEntry[]);
+  const onlyLorebookIdSet = options?.onlyLorebookIds ? new Set(options.onlyLorebookIds) : null;
+  const normallyActiveEntries = (
+    forcedEntriesOnly ? [] : ((await storage.listActiveEntries(filters)) as unknown as LorebookEntry[])
+  ).filter((entry) => !onlyLorebookIdSet || onlyLorebookIdSet.has(entry.lorebookId));
   let allEntries = applyLorebookDefaults(
     Array.from(new Map([...normallyActiveEntries, ...forcedEntries].map((entry) => [entry.id, entry])).values()),
     relevantLorebooksById,

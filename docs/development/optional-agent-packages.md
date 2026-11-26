@@ -353,7 +353,7 @@ duplicating its context. The host retains each contribution's package identity i
 `packageBlocks` to place package-owned text at the corresponding agent section. A
 contributor returning audience-specific text should respect the supplied target character IDs.
 From capability API 1.839, `api.registerPromptContext(contributor, { timeoutMs })` may ask for a longer deadline
-than the default 2 s, up to 15 s (see [Capability API 1.839](#capability-api-1839-lorebook-management-for-packages)).
+than the default 2 s, up to 5 s (see [Capability API 1.839](#capability-api-1839-lorebook-management-for-packages)).
 
 A server entrypoint may also register its own post-processing lifecycle service through
 `api.registerService("agent-runtime:<package-id>", service)`. It needs the `agent-runtime`
@@ -1912,14 +1912,16 @@ prompt-context contributor, so they aren't injected twice.
 - Claims apply to the scans that build the prompt (generation, Peek Prompt, retries, the lorebook test scan) and
   to the lorebook context agents read there. They don't hide a book from membership checks, `{{include::}}`,
   agent lorebook triggers, or entries the user picks explicitly (Game setup, Game lore picks).
-- The scan runs before contributors, so a claimed book is injected only by the package. If its contributor fails
-  or times out, those books are missing for that turn: keep the claim's share of the work local and fast, and
-  return the local result when an optional model call fails.
+- The scan runs before contributors, so a claimed book is injected only by the package. If its contributor throws
+  or times out, the Engine re-scans that package's claimed books the way it would have without the claim (keywords,
+  constants, current-location entries, budgets; no embeddings or decision statements) and puts the result where the
+  package's text would have gone, so no lore is lost. Still return your local result when an optional model call
+  fails: the fallback is a safety net, not the plan.
 - The chat's Lorebooks section shows "Handled by <package name>" on a claimed book.
   `GET /api/chats/:id/lorebook-claims` returns `{ claims: [{ packageId, packageName, lorebookIds }] }`.
 
 **Longer contributor deadline.** `api.registerPromptContext(contributor, { timeoutMs })` may ask for a deadline
-between the default 2 s and 15 s, for a contributor that makes one model call over its candidates. Every second
+between the default 2 s and 5 s, for a contributor that makes one model call over its candidates. Every second
 delays the reply, so return a local fallback when the call runs long, and ask only for what it needs.
 
 **EntityRef.** `LorebookEntry.relationships` keys are bare entry ids, or typed `<kind>:<id>` references to other

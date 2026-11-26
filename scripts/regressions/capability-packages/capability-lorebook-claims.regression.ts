@@ -22,6 +22,10 @@ const { resolveLorebookScopeExclusions } =
   await import("../../../packages/server/src/services/lorebook/game-lorebook-scope.js");
 const { registerCapabilityLorebookClaims, collectCapabilityLorebookClaims } =
   await import("../../../packages/server/src/services/capability-packages/capability-lorebook-claims.service.js");
+const { registerCapabilityPromptContext } =
+  await import("../../../packages/server/src/services/capability-packages/capability-prompt-context.service.js");
+const { createClaimedLorebookRescan, injectCapabilityContexts } =
+  await import("../../../packages/server/src/services/generation/capability-prompt-runtime.js");
 
 const db = await getDB();
 try {
@@ -110,6 +114,50 @@ try {
     collectCapabilityLorebookClaims({ chatId: "chat-1", chatMode: "roleplay", chatMeta: {} }).lorebookIds,
     [plain.id],
   );
+
+  // Fallback: a claiming package whose contributor fails gets its claimed books re-scanned, so no lore is lost.
+  const rescan = createClaimedLorebookRescan(db, {
+    chatId: "chat-1",
+    chatMode: "roleplay",
+    chatMeta: {},
+    scanMessages: () => [{ role: "user", content: "We reach the court." }],
+    characterIds: [],
+    activeLorebookIds: [],
+    forcedEntryIds: [hall.id, rain.id],
+    wrapFormat: "xml",
+  });
+  const fallbackText = await rescan([managed.id]);
+  assert.ok(fallbackText?.startsWith("<world_info>"), String(fallbackText));
+  assert.match(fallbackText!, /Unseelie Court lore\./);
+  assert.match(fallbackText!, /Moonlit Hall lore\./, "current-location entries of claimed books come back too");
+  assert.doesNotMatch(fallbackText!, /Rain lore/, "only the claimed books are re-scanned");
+
+  const releaseClaim = registerCapabilityLorebookClaims("lorebook-manager", () => [managed.id]);
+  const request = { chatId: "chat-1", chatMeta: {}, mode: "roleplay", wrapFormat: "xml" as const };
+  const systemPrompt = () => [{ role: "system" as const, content: "System." }];
+  let rescans = 0;
+  const countingRescan = async (ids: string[]) => {
+    rescans += 1;
+    return rescan(ids);
+  };
+
+  const releaseBroken = registerCapabilityPromptContext("lorebook-manager", () => {
+    throw new Error("retrieval crashed");
+  });
+  const brokenMessages = systemPrompt();
+  await injectCapabilityContexts(brokenMessages, request, db, new Map(), { rescanClaimedLorebooks: countingRescan });
+  assert.equal(rescans, 1);
+  assert.match(brokenMessages[0]!.content, /Unseelie Court lore\./, "the failed package's lore is put back");
+  releaseBroken();
+
+  const releaseWorking = registerCapabilityPromptContext("lorebook-manager", () => "Compendium picks.");
+  const workingMessages = systemPrompt();
+  await injectCapabilityContexts(workingMessages, request, db, new Map(), { rescanClaimedLorebooks: countingRescan });
+  assert.equal(rescans, 1, "no rescan when the package delivered");
+  assert.doesNotMatch(workingMessages[0]!.content, /Unseelie Court lore/);
+  assert.match(workingMessages[0]!.content, /Compendium picks\./);
+  releaseWorking();
+  releaseClaim();
 
   // Let a swallowed rejection settle before the process could report it as unhandled.
   await new Promise((resolve) => setTimeout(resolve, 20));

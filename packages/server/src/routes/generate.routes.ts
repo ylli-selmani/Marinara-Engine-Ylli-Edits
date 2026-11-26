@@ -743,7 +743,10 @@ import {
   waitForConversationPresenceDelay,
 } from "./generate/conversation-presence-runtime.js";
 import { resolveProfessorMariPromptContext } from "./generate/professor-mari-prompt-context.js";
-import { injectCapabilityContexts } from "../services/generation/capability-prompt-runtime.js";
+import {
+  createClaimedLorebookRescan,
+  injectCapabilityContexts,
+} from "../services/generation/capability-prompt-runtime.js";
 import {
   executeGmVerbCalls,
   parseAndStripGmVerbCalls,
@@ -5673,6 +5676,22 @@ export async function generateRoutes(app: FastifyInstance, options: GenerateRout
             },
             app.db,
             runtimeAgentSectionTokens,
+            {
+              rescanClaimedLorebooks: createClaimedLorebookRescan(app.db, {
+                chatId: input.chatId,
+                chatMode: "game",
+                chatMeta,
+                scanMessages: toLorebookScanMessages,
+                characterIds: withIdentityLorebookScope(characterIds),
+                personaId,
+                activeLorebookIds: chatActiveLorebookIds,
+                forcedEntryIds:
+                  ownerSpatialProjection?.ownerMode === "game" ? ownerSpatialProjection.lorebookEntryIds : [],
+                tokenBudget: resolveLorebookTokenBudget(chatMeta),
+                resolveContent: resolvePromptMacrosForLorebook,
+                wrapFormat,
+              }),
+            },
           );
 
           // Game bypasses the preset assembler, so card-authored depth and
@@ -6227,6 +6246,21 @@ export async function generateRoutes(app: FastifyInstance, options: GenerateRout
             },
             app.db,
             runtimeAgentSectionTokens,
+            {
+              rescanClaimedLorebooks: createClaimedLorebookRescan(app.db, {
+                chatId: input.chatId,
+                chatMode,
+                chatMeta,
+                scanMessages: toLorebookScanMessages,
+                characterIds: withIdentityLorebookScope(characterIds),
+                personaId,
+                activeLorebookIds: chatActiveLorebookIds,
+                forcedEntryIds: chatMode === "conversation" ? [] : (ownerSpatialProjection?.lorebookEntryIds ?? []),
+                tokenBudget: resolveLorebookTokenBudget(chatMeta),
+                resolveContent: resolvePromptMacrosForLorebook,
+                wrapFormat,
+              }),
+            },
           );
         }
 
