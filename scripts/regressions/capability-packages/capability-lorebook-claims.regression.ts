@@ -24,7 +24,7 @@ const { registerCapabilityLorebookClaims, collectCapabilityLorebookClaims } =
   await import("../../../packages/server/src/services/capability-packages/capability-lorebook-claims.service.js");
 const { registerCapabilityPromptContext } =
   await import("../../../packages/server/src/services/capability-packages/capability-prompt-context.service.js");
-const { createClaimedLorebookRescan, injectCapabilityContexts } =
+const { capabilityPromptLocation, createClaimedLorebookRescan, injectCapabilityContexts } =
   await import("../../../packages/server/src/services/generation/capability-prompt-runtime.js");
 
 const db = await getDB();
@@ -157,6 +157,44 @@ try {
   assert.doesNotMatch(workingMessages[0]!.content, /Unseelie Court lore/);
   assert.match(workingMessages[0]!.content, /Compendium picks\./);
   releaseWorking();
+
+  // 1.839: a contributor sees which message a swipe replaces, and where the chat is on its World Maps map.
+  const projection = {
+    kind: "owner" as const,
+    chatId: "chat-claims",
+    ownerMode: "roleplay" as const,
+    definitionRevision: 1,
+    currentLocationId: "loc-hall",
+    breadcrumb: [
+      { id: "loc-faerie", name: "Faerie" },
+      { id: "loc-hall", name: "Moon Hall" },
+    ],
+    description: "",
+    modelMemory: null,
+    referenceImageId: null,
+    useReferenceImage: false,
+    lorebookEntryIds: ["entry-hall"],
+    destinations: [],
+    omittedDestinationCount: 0,
+  };
+  assert.equal(capabilityPromptLocation(null, "roleplay"), null);
+  assert.equal(capabilityPromptLocation(projection, "game"), null, "a map from another mode is not this chat's place");
+  const location = capabilityPromptLocation(projection, "roleplay");
+  assert.deepEqual(location, { locationId: "loc-hall", path: "Faerie > Moon Hall", lorebookEntryIds: ["entry-hall"] });
+  const seenRequests: Array<{ regenerateMessageId?: string | null; currentLocation?: unknown }> = [];
+  const releaseSeeing = registerCapabilityPromptContext("lorebook-manager", (contextRequest) => {
+    seenRequests.push(contextRequest);
+    return null;
+  });
+  await injectCapabilityContexts(
+    systemPrompt(),
+    { ...request, regenerateMessageId: "msg-7", currentLocation: location },
+    db,
+    new Map(),
+  );
+  assert.equal(seenRequests[0]?.regenerateMessageId, "msg-7");
+  assert.deepEqual(seenRequests[0]?.currentLocation, location);
+  releaseSeeing();
   releaseClaim();
 
   // Let a swallowed rejection settle before the process could report it as unhandled.
