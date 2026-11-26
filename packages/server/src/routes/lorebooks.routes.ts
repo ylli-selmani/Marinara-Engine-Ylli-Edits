@@ -1197,7 +1197,7 @@ export async function lorebooksRoutes(app: FastifyInstance) {
       }
     }
 
-    const lorebookScopeExclusions = resolveLorebookScopeExclusions(chat?.mode, chatMeta);
+    const lorebookScopeExclusions = resolveLorebookScopeExclusions(chat?.mode, chatMeta, { chatId: chat?.id });
     const scanSourceMessages = selectMessagesForLastGenerationScan(chatMessages);
     const scanMessages = scanSourceMessages.map((m) => ({
       role: (m.role === "narrator" ? "system" : m.role) as string,

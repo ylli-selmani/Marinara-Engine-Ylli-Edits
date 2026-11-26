@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { CharacterData } from "../../packages/shared/src/index.js";
+import type { CharacterData } from "../../../packages/shared/src/index.js";
 
 const dir = mkdtempSync(join(tmpdir(), "marinara-resources-lorebook-entries-"));
 process.env.DATA_DIR = dir;
@@ -16,13 +16,13 @@ process.env.FILE_STORAGE_DIR = join(dir, "storage");
 process.env.NODE_ENV = "test";
 process.env.LOG_LEVEL = "silent";
 
-const { getDB, closeDB } = await import("../../packages/server/src/db/connection.js");
+const { getDB, closeDB } = await import("../../../packages/server/src/db/connection.js");
 const { createCapabilityResourceHost } =
-  await import("../../packages/server/src/services/capability-packages/capability-resources.service.js");
-const { createLorebooksStorage } = await import("../../packages/server/src/services/storage/lorebooks.storage.js");
-const { createCharactersStorage } = await import("../../packages/server/src/services/storage/characters.storage.js");
+  await import("../../../packages/server/src/services/capability-packages/capability-resources.service.js");
+const { createLorebooksStorage } = await import("../../../packages/server/src/services/storage/lorebooks.storage.js");
+const { createCharactersStorage } = await import("../../../packages/server/src/services/storage/characters.storage.js");
 const { embedLorebookIntoCharacter } =
-  await import("../../packages/server/src/services/lorebook/character-book-sync.js");
+  await import("../../../packages/server/src/services/lorebook/character-book-sync.js");
 
 const db = await getDB();
 try {

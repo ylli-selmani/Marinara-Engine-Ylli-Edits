@@ -3557,7 +3557,7 @@ export async function generateRoutes(app: FastifyInstance, options: GenerateRout
         const chatActiveLorebookIds: string[] = Array.isArray(chatMeta.activeLorebookIds)
           ? (chatMeta.activeLorebookIds as string[])
           : [];
-        const lorebookScopeExclusions = resolveLorebookScopeExclusions(chatMode, chatMeta);
+        const lorebookScopeExclusions = resolveLorebookScopeExclusions(chatMode, chatMeta, { chatId: input.chatId });
         let lorebookScanSnapshot: LorebookScanSnapshot = emptyLorebookScanSnapshot();
         let lorebookPromptScanResult: LorebookScanResult | null = null;
         // Blocks injected at a depth, so Peek prompt can name them inside the message post-processing put them in.

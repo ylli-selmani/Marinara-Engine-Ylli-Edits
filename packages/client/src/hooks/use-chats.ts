@@ -73,6 +73,8 @@ export const chatKeys = {
   all: ["chats"] as const,
   list: () => [...chatKeys.all, "list"] as const,
   detail: (id: string) => [...chatKeys.all, "detail", id] as const,
+  /** Under `detail`, so a chat refetch also refreshes which lorebooks packages handle. */
+  lorebookClaims: (id: string) => [...chatKeys.detail(id), "lorebookClaims"] as const,
   messages: (chatId: string) => [...chatKeys.all, "messages", chatId] as const,
   /** Under `messages`, so whatever refreshes the transcript refreshes this count too. */
   summaryBacklog: (chatId: string, coverageKey: string) =>
@@ -2368,5 +2370,21 @@ export function useDisconnectChat() {
       qc.invalidateQueries({ queryKey: chatKeys.detail(chatId) });
       qc.invalidateQueries({ queryKey: chatKeys.list() });
     },
+  });
+}
+
+/** A capability package that injects some of this chat's lorebooks itself (the Engine's own scan skips them). */
+export interface ChatLorebookClaim {
+  packageId: string;
+  packageName: string;
+  lorebookIds: string[];
+}
+
+export function useChatLorebookClaims(chatId: string | null | undefined) {
+  return useQuery({
+    queryKey: chatKeys.lorebookClaims(chatId ?? ""),
+    queryFn: async () => (await api.get<{ claims: ChatLorebookClaim[] }>(`/chats/${chatId}/lorebook-claims`)).claims,
+    enabled: Boolean(chatId),
+    staleTime: 30_000,
   });
 }

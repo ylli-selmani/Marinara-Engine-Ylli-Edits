@@ -64,6 +64,10 @@ import {
   withDeadline,
   type CapabilityPromptContextContributor,
 } from "./capability-prompt-context.service.js";
+import {
+  registerCapabilityLorebookClaims,
+  type CapabilityLorebookClaimResolver,
+} from "./capability-lorebook-claims.service.js";
 import { registerCapabilityTool, type CapabilityToolRegistration } from "./capability-tool-registry.service.js";
 import { registerCapabilitySceneOrigin } from "./capability-scene-origin.service.js";
 import { createCapabilitySpriteHost } from "./capability-sprites.service.js";
@@ -95,6 +99,7 @@ type CapabilityActivationContext = {
     registerService<T>(key: string, service: T, options?: { hostOnly?: boolean }): Cleanup;
     /** Contribute text to each turn's system prompt. Requires the `prompt-context` permission. */
     registerPromptContext(contributor: CapabilityPromptContextContributor): Cleanup;
+    registerLorebookClaims(resolver: CapabilityLorebookClaimResolver): Cleanup;
     /** Offer the model a tool this package handles. Requires the `tools` permission. */
     registerTool(registration: CapabilityToolRegistration): Cleanup;
     /** Contribute badges to the Home achievements panel, shown under this package's own section.
@@ -430,6 +435,16 @@ class CapabilityModuleRuntime {
               );
             }
             return trackCleanup(registerCapabilityPromptContext(installed.id, contributor));
+          },
+          // Claims change what the Engine injects, so they ride on the same permission as prompt context.
+          // Contract in capability-lorebook-claims.service.ts.
+          registerLorebookClaims: (resolver) => {
+            if (!installed.manifest.permissions?.includes("prompt-context")) {
+              throw new Error(
+                `Capability package ${installed.id} must declare the "prompt-context" permission to claim lorebooks`,
+              );
+            }
+            return trackCleanup(registerCapabilityLorebookClaims(installed.id, resolver, installed.manifest.name));
           },
           registerTool: (registration) => {
             if (!installed.manifest.permissions?.includes("tools")) {

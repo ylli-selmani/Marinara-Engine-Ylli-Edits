@@ -862,7 +862,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
       userMessage,
       attachments: body.attachments,
     });
-    const lorebookScopeExclusions = resolveLorebookScopeExclusions(chatMode, chatMeta);
+    const lorebookScopeExclusions = resolveLorebookScopeExclusions(chatMode, chatMeta, { chatId });
     const lorebookTokenBudget = resolveDryRunLorebookTokenBudget(chatMeta);
     if (!impersonate && rawUserMessage.trim()) {
       chatMessages = [

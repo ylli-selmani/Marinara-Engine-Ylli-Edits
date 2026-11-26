@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { BookOpen, Eye, EyeOff, Pencil, Plus, Trash2 } from "lucide-react";
 import { useTranslation, useTranslation as useUiTranslation } from "react-i18next";
 import { LIMITS, type Chat, type Lorebook } from "@marinara-engine/shared";
-import { chatKeys, useUpdateChatMetadata } from "../../../hooks/use-chats";
+import { chatKeys, useChatLorebookClaims, useUpdateChatMetadata } from "../../../hooks/use-chats";
 import { isLorebookScopeActiveForChat } from "../../../lib/lorebook-scope";
 import {
   getChatActiveLorebookIds,
@@ -45,6 +45,17 @@ export function LorebooksSection({
   const { t } = useTranslation();
   const qc = useQueryClient();
   const updateMeta = useUpdateChatMetadata();
+  const { data: lorebookClaims } = useChatLorebookClaims(chatId);
+  // Which package injects a lorebook itself in this chat; the Engine's own scan skips those books.
+  const claimedBy = useMemo(() => {
+    const byLorebook = new Map<string, string>();
+    for (const claim of lorebookClaims ?? []) {
+      for (const lorebookId of claim.lorebookIds) {
+        if (!byLorebook.has(lorebookId)) byLorebook.set(lorebookId, claim.packageName);
+      }
+    }
+    return byLorebook;
+  }, [lorebookClaims]);
   const lorebookTokenBudget =
     typeof metadata.lorebookTokenBudget === "number" && Number.isFinite(metadata.lorebookTokenBudget)
       ? Math.max(0, Math.floor(metadata.lorebookTokenBudget))
@@ -178,14 +189,26 @@ export function LorebooksSection({
                           {localizeUi("ui.agents.agenteditor.disabled")}
                         </span>
                       ) : (
-                        lorebook.activeReasons.map((reason) => (
-                          <span
-                            key={reason}
-                            className="rounded-full bg-[var(--background)]/70 px-1.5 py-0.5 text-[0.5625rem] font-medium text-[var(--muted-foreground)] ring-1 ring-[var(--border)]"
-                          >
-                            {reason}
-                          </span>
-                        ))
+                        <>
+                          {claimedBy.has(lorebook.id) ? (
+                            <span
+                              className="rounded-full bg-[var(--primary)]/15 px-1.5 py-0.5 text-[0.5625rem] font-medium text-[var(--primary)] ring-1 ring-[var(--primary)]/30"
+                              title={localizeUi("ui.chatSettings.lorebookssection.handledByPackageHint")}
+                            >
+                              {localizeUi("ui.chatSettings.lorebookssection.handledByPackage", {
+                                name: claimedBy.get(lorebook.id),
+                              })}
+                            </span>
+                          ) : null}
+                          {lorebook.activeReasons.map((reason) => (
+                            <span
+                              key={reason}
+                              className="rounded-full bg-[var(--background)]/70 px-1.5 py-0.5 text-[0.5625rem] font-medium text-[var(--muted-foreground)] ring-1 ring-[var(--border)]"
+                            >
+                              {reason}
+                            </span>
+                          ))}
+                        </>
                       )}
                     </div>
                   </div>

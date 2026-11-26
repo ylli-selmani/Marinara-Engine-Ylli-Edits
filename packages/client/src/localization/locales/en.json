@@ -12774,6 +12774,8 @@
   "ui.chatSettings.lorebookssection.contextCapForActivatedLorebookRetrievalsInThisChat": "Context cap for activated lorebook retrievals in this chat. Default: {{value1}}. Set to 0 for unlimited.",
   "ui.chatSettings.lorebookssection.disableInThisChat": "Disable in this chat",
   "ui.chatSettings.lorebookssection.enableInThisChat": "Enable in this chat",
+  "ui.chatSettings.lorebookssection.handledByPackage": "Handled by {{name}}",
+  "ui.chatSettings.lorebookssection.handledByPackageHint": "This package picks and injects this lorebook's entries itself, so the normal lorebook scan skips it in this chat.",
   "ui.chatSettings.lorebookssection.lorebooksContainWorldInfoCharacterBackstoriesAndLoreThat": "Lorebooks hold world info, backstories, and lore. The AI gets an entry when its keywords come up in the chat.",
   "ui.chatSettings.lorebookssection.lorebookTokenBudget": "Lorebook Token Budget",
   "ui.chatSettings.lorebookssection.noLorebooksActiveInThisChat": "No lorebooks active in this chat.",

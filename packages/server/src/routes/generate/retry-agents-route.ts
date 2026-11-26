@@ -1796,7 +1796,7 @@ async function buildRetryAgentContext(args: {
   }
 
   if (agentsWithLorebookTriggers.length > 0) {
-    const lorebookScopeExclusions = resolveLorebookScopeExclusions(chat.mode, chatMeta);
+    const lorebookScopeExclusions = resolveLorebookScopeExclusions(chat.mode, chatMeta, { chatId });
     const scopedLorebookIds = new Set(
       filterRelevantLorebooks((await lorebooksStore.list()) as unknown as Lorebook[], {
         chatId,
@@ -5313,7 +5313,7 @@ export async function registerRetryAgentsRoute(
             (value): value is string => typeof value === "string" && value.trim().length > 0,
           )
         : [];
-      const lorebookScopeExclusions = resolveLorebookScopeExclusions(chatMode, chatMeta);
+      const lorebookScopeExclusions = resolveLorebookScopeExclusions(chatMode, chatMeta, { chatId });
       const phaseToolInputs = resolveRetryAgentPhaseToolInputs({
         requestBody: request.body as unknown as Record<string, unknown>,
         agentContext,

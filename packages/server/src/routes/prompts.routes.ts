@@ -500,7 +500,7 @@ export async function promptsRoutes(app: FastifyInstance) {
         advancedMemory: preview.body.prompt?.advancedMemory,
       };
     }
-    const lorebookScopeExclusions = resolveLorebookScopeExclusions(chat.mode, chatMeta);
+    const lorebookScopeExclusions = resolveLorebookScopeExclusions(chat.mode, chatMeta, { chatId });
     const mappedMessages = chatMessages.map((m: any) => ({
       role: m.role === "narrator" ? ("system" as const) : (m.role as "user" | "assistant" | "system"),
       content: m.content as string,

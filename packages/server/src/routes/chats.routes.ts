@@ -237,6 +237,7 @@ import {
   filterGameInternalAgentIds,
   resolveLorebookScopeExclusions,
 } from "../services/lorebook/game-lorebook-scope.js";
+import { collectCapabilityLorebookClaims } from "../services/capability-packages/capability-lorebook-claims.service.js";
 import {
   isMemoryRecallVectorizerAvailable,
   resetMemoryRecallVectorizerCache,
@@ -1494,6 +1495,19 @@ export async function chatsRoutes(app: FastifyInstance) {
   });
 
   // Get single chat
+  // Lorebooks an active capability package injects itself in this chat, so the Lorebooks panel can say why the
+  // Engine's own scan skips them (capability-lorebook-claims.service.ts).
+  app.get<{ Params: { id: string } }>("/:id/lorebook-claims", async (req, reply) => {
+    const chat = await storage.getById(req.params.id);
+    if (!chat || isHomeProfessorMariChat(chat)) return notFound(reply, "Chat not found");
+    const claims = collectCapabilityLorebookClaims({
+      chatId: chat.id,
+      chatMode: chat.mode,
+      chatMeta: parseChatMetadata(chat.metadata),
+    });
+    return { claims: claims.byPackage };
+  });
+
   app.get<{ Params: { id: string } }>("/:id", async (req, reply) => {
     const chat = await storage.getById(req.params.id);
     if (!chat || isHomeProfessorMariChat(chat)) {
@@ -4165,7 +4179,7 @@ export async function chatsRoutes(app: FastifyInstance) {
           promptMacroContext.lastInput = [...mappedMessages]
             .reverse()
             .find((message) => message.role === "user")?.content;
-          const lorebookScopeExclusions = resolveLorebookScopeExclusions(chatMode, chatMeta);
+          const lorebookScopeExclusions = resolveLorebookScopeExclusions(chatMode, chatMeta, { chatId: req.params.id });
           const activeLorebookIds = Array.isArray(chatMeta.activeLorebookIds)
             ? (chatMeta.activeLorebookIds as string[])
             : [];

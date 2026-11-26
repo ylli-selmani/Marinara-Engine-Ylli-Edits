@@ -7500,7 +7500,7 @@ export async function gameRoutes(app: FastifyInstance, options: GameRouteOptions
         setLorebookEntryCounts(setupPromptMacroContext, lorebookEntryCounts);
         return resolveMacrosWithVariableSnapshot(value, setupPromptMacroContext);
       };
-      const setupLorebookScopeExclusions = resolveLorebookScopeExclusions("game", meta);
+      const setupLorebookScopeExclusions = resolveLorebookScopeExclusions("game", meta, { chatId });
       const lorebookResult = await processLorebooks(app.db, [], null, {
         chatId,
         characterIds: setupConfig.partyCharacterIds,
@@ -13003,7 +13003,7 @@ export async function gameRoutes(app: FastifyInstance, options: GameRouteOptions
           loreMacroLimitExceeded ||= macroBudget.exceeded;
           return resolved;
         };
-        const loreScopeExclusions = resolveLorebookScopeExclusions("game", meta);
+        const loreScopeExclusions = resolveLorebookScopeExclusions("game", meta, { chatId: req.params.chatId });
         const lorebookResult = await processLorebooks(app.db, [], null, {
           chatId: req.params.chatId,
           characterIds: loreCharacterIds,
