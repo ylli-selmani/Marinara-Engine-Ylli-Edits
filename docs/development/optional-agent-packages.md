@@ -354,6 +354,8 @@ duplicating its context. The host retains each contribution's package identity i
 contributor returning audience-specific text should respect the supplied target character IDs.
 From capability API 1.839, `api.registerPromptContext(contributor, { timeoutMs })` may ask for a longer deadline
 than the default 2 s, up to 5 s (see [Capability API 1.839](#capability-api-1839-lorebook-management-for-packages)).
+From 1.839 the request also carries `regenerateMessageId` on a regenerate or swipe: the message being replaced. The
+Engine's own lorebook scan leaves it and everything after it out, so a contributor that reads the chat should too.
 
 A server entrypoint may also register its own post-processing lifecycle service through
 `api.registerService("agent-runtime:<package-id>", service)`. It needs the `agent-runtime`

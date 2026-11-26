@@ -2237,6 +2237,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
         personaId,
         placedAgentTypes: [...runtimeAgentSectionTypes],
         wrapFormat,
+        regenerateMessageId: regenerateMessageId ?? null,
       },
       app.db,
       trackerSectionTokens,

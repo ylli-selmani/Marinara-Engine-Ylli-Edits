@@ -24,6 +24,12 @@ export interface CapabilityPromptContextRequest {
   placedAgentTypes?: string[];
   /** The preset's section wrap format, so a contributor's block matches the prompt around it. */
   wrapFormat?: "xml" | "markdown" | "none";
+  /**
+   * Capability API 1.839. On a regenerate or swipe, the message being replaced. The Engine leaves it (and anything
+   * after it) out of its own lorebook scan, so a contributor reading the chat should too, or every swipe matches
+   * against the previous swipe's text.
+   */
+  regenerateMessageId?: string | null;
 }
 
 /** Built-in game systems an experience can declare it replaces. Open set — undeclared stays built-in. */
