@@ -178,9 +178,14 @@ try {
           "Preview and generation honor chat and audience boundaries",
         );
       }
+      // 1.839: only the preview says `preview`, so packages record nothing for it; everything else matches.
+      const { preview: previewFlag, ...previewRequest } = calls[0] ?? {};
+      const { preview: generationFlag, ...generationRequest } = calls[1] ?? {};
+      assert.equal(previewFlag, true, "The preview tells contributors it is a preview");
+      assert.equal(generationFlag, undefined, "A real turn is not a preview");
       assert.deepEqual(
-        calls[0],
-        calls[1],
+        previewRequest,
+        generationRequest,
         "Preview and generation supply the same chat, mode, character, persona and placement context",
       );
       if (positioned)

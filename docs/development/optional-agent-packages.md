@@ -358,7 +358,8 @@ From 1.839 the request also carries `regenerateMessageId` on a regenerate or swi
 Engine's own lorebook scan leaves it and everything after it out, so a contributor that reads the chat should too.
 It also carries `currentLocation` (`locationId`, breadcrumb `path`, linked `lorebookEntryIds`) when World Maps is
 added to the chat and its map belongs to the chat's mode. A package that claims lorebooks should inject those
-linked entries itself: a claim skips them in the Engine's scan too.
+linked entries itself: a claim skips them in the Engine's scan too. Peek Prompt's live preview and the dry run
+call contributors as well, with `preview: true`: return the same text, but record nothing.
 
 A server entrypoint may also register its own post-processing lifecycle service through
 `api.registerService("agent-runtime:<package-id>", service)`. It needs the `agent-runtime`

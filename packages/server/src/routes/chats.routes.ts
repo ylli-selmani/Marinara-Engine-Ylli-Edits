@@ -247,6 +247,11 @@ import { isLocalEmbedderAvailable } from "../services/local-embedder.js";
 import { applyRegexScriptsToPromptMessages } from "../services/regex/regex-application.js";
 import { npcAvatarSlug, sanitizeGameNpcAvatarUrls } from "../services/game/npc-avatar-utils.js";
 import { buildCommittedTrackerContextBlock } from "../services/generation/committed-tracker-context.js";
+import {
+  capabilityPromptLocation,
+  createClaimedLorebookRescan,
+  injectCapabilityContexts,
+} from "../services/generation/capability-prompt-runtime.js";
 import { normalizeBeholderState } from "../services/agents/beholder-state.js";
 import { parseLorebookWriteApprovalText } from "./generate/agent-write-approval.js";
 import { getLorebookNamingScheme, persistLorebookKeeperUpdates } from "./generate/lorebook-keeper-utils.js";
@@ -4297,6 +4302,48 @@ export async function chatsRoutes(app: FastifyInstance) {
             ownerSpatialProjection && ownerSpatialProjection.ownerMode === chatMode
               ? ownerSpatialProjection.lorebookEntryIds
               : [];
+          // Package context (prompt-context packages such as the Lorebook Manager), placed the way a turn places it.
+          // Without it a chat whose books a package claims shows no lore here, since the scans above skip them.
+          // Read-only: the request says `preview`, so packages record nothing. Peek drops trailing replies, so it
+          // previews them as a regenerate of the first one dropped.
+          const firstDroppedReplyId: unknown = filteredMessages[mappedMessages.length]?.id;
+          const peekRegenerateMessageId = typeof firstDroppedReplyId === "string" ? firstDroppedReplyId : null;
+          const withPackageContext = async (
+            messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
+            wrapFormat?: "xml" | "markdown" | "none",
+          ) => {
+            await injectCapabilityContexts(
+              messages,
+              {
+                chatId: req.params.id,
+                chatMeta,
+                mode: chatMode,
+                targetCharacterIds: assistantCharacterIds,
+                personaId,
+                wrapFormat,
+                regenerateMessageId: peekRegenerateMessageId,
+                currentLocation: capabilityPromptLocation(ownerSpatialProjection, chatMode),
+                preview: true,
+              },
+              app.db,
+              new Map(),
+              {
+                rescanClaimedLorebooks: createClaimedLorebookRescan(app.db, {
+                  chatId: req.params.id,
+                  chatMode,
+                  chatMeta,
+                  scanMessages: () => mappedMessages,
+                  characterIds: lorebookCharacterIds,
+                  personaId,
+                  activeLorebookIds,
+                  forcedEntryIds: chatMode === "conversation" ? [] : forcedLorebookEntryIds,
+                  tokenBudget: lorebookTokenBudget,
+                  resolveContent: resolvePromptMacros,
+                  wrapFormat,
+                }),
+              },
+            );
+          };
           if (chatMode === "conversation") {
             const customPrompt =
               typeof chatMeta.customSystemPrompt === "string" && chatMeta.customSystemPrompt.trim()
@@ -4323,6 +4370,7 @@ export async function chatsRoutes(app: FastifyInstance) {
               },
               ...mappedMessages,
             ];
+            await withPackageContext(messages, wrapFormat);
             return {
               messages: toPeekPromptMessages(messages),
               chatMode,
@@ -4385,6 +4433,10 @@ export async function chatsRoutes(app: FastifyInstance) {
             if (lorebookResult.depthEntries.length > 0) {
               messages = injectAtDepth(messages, lorebookResult.depthEntries);
             }
+            await withPackageContext(
+              messages,
+              normalizePromptWrapFormat((preset as Record<string, unknown> | null)?.wrapFormat),
+            );
             return {
               messages: toPeekPromptMessages(injectOwnerSpatialPrompt(messages, ownerSpatialProjection)),
               chatMode,
@@ -4430,6 +4482,7 @@ export async function chatsRoutes(app: FastifyInstance) {
             if (lorebookResult.depthEntries.length > 0) {
               messages = injectAtDepth(messages, lorebookResult.depthEntries);
             }
+            await withPackageContext(messages);
             return {
               messages: toPeekPromptMessages(injectOwnerSpatialPrompt(messages, ownerSpatialProjection)),
               chatMode,
@@ -4763,6 +4816,7 @@ export async function chatsRoutes(app: FastifyInstance) {
             }
           }
 
+          await withPackageContext(assembled.messages, wrapFormat);
           return {
             messages: toPeekPromptMessages(injectOwnerSpatialPrompt(assembled.messages, ownerSpatialProjection)),
             chatMode,

@@ -2240,6 +2240,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
         wrapFormat,
         regenerateMessageId: regenerateMessageId ?? null,
         currentLocation: capabilityPromptLocation(ownerSpatialProjection, chatMode),
+        preview: true,
       },
       app.db,
       trackerSectionTokens,

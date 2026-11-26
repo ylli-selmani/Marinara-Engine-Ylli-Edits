@@ -46,6 +46,11 @@ export interface CapabilityPromptContextRequest {
    * inject the linked entries itself, since a claim also skips them in the Engine's scan.
    */
   currentLocation?: CapabilityPromptContextLocation | null;
+  /**
+   * Capability API 1.839. The context is only shown (Peek Prompt) or used for a dry run, never sent as a turn.
+   * Return the same text, but record nothing (no activity logs, no counters).
+   */
+  preview?: boolean;
 }
 
 /** Built-in game systems an experience can declare it replaces. Open set — undeclared stays built-in. */
