@@ -5,12 +5,30 @@ import {
   type CapabilityPromptContextRequest,
 } from "../capability-packages/capability-prompt-context.service.js";
 import { collectCapabilityLorebookClaims } from "../capability-packages/capability-lorebook-claims.service.js";
+import type { ResolvedOwnerSpatialProjection } from "@marinara-engine/shared";
+import { formatOwnerSpatialBreadcrumb } from "../spatial-context/projection.js";
 import { collectRoleplayEventContext } from "../capability-packages/capability-roleplay-events.service.js";
 import { processLorebooks } from "../lorebook/index.js";
 import { resolveLorebookScopeExclusions } from "../lorebook/game-lorebook-scope.js";
 import { replaceRuntimeAgentSection, type RuntimeAgentSectionTokens } from "./runtime-agent-sections.js";
 
 type ProcessLorebookOptions = NonNullable<Parameters<typeof processLorebooks>[3]>;
+
+/**
+ * The current location for a prompt-context request: only when the projection's map belongs to this chat's mode,
+ * the same rule the Engine's own scan uses for World Maps' forced entries.
+ */
+export function capabilityPromptLocation(
+  projection: ResolvedOwnerSpatialProjection | null | undefined,
+  chatMode: string,
+): CapabilityPromptContextRequest["currentLocation"] {
+  if (!projection || projection.ownerMode !== chatMode) return null;
+  return {
+    locationId: projection.currentLocationId,
+    path: formatOwnerSpatialBreadcrumb(projection).trim(),
+    lorebookEntryIds: [...projection.lorebookEntryIds],
+  };
+}
 
 /**
  * Re-scans lorebooks a package claimed for this chat, for the turn that package failed to deliver its own context.

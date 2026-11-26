@@ -233,6 +233,7 @@ import { createReplyFallbackNotifier } from "./fallback-notification.js";
 import { resolveGameGmPromptTemplate } from "../../services/generation/game-gm-prompt-runtime.js";
 
 import {
+  capabilityPromptLocation,
   createClaimedLorebookRescan,
   injectCapabilityContexts,
 } from "../../services/generation/capability-prompt-runtime.js";
@@ -2238,6 +2239,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
         placedAgentTypes: [...runtimeAgentSectionTypes],
         wrapFormat,
         regenerateMessageId: regenerateMessageId ?? null,
+        currentLocation: capabilityPromptLocation(ownerSpatialProjection, chatMode),
       },
       app.db,
       trackerSectionTokens,

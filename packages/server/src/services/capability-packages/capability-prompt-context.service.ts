@@ -10,6 +10,16 @@ import { currentRoomGeneration } from "../multiplayer/generation-policy.js";
 import { logRateLimited } from "../../lib/log-rate-limit.js";
 
 /** Read-only view of the turn handed to each contributor. */
+/** Capability API 1.839. The chat's current World Maps location, as the Engine's own lorebook scan uses it. */
+export interface CapabilityPromptContextLocation {
+  /** The World Maps location id (`loc:<id>` as an EntityRef). */
+  locationId: string;
+  /** Breadcrumb names, outermost first, joined with " > ". */
+  path: string;
+  /** Lorebook entries World Maps links to this location: the ones the Engine's scan forces in for it. */
+  lorebookEntryIds: string[];
+}
+
 export interface CapabilityPromptContextRequest {
   chatId: string;
   /** The chat's metadata record (where game/agent state lives). */
@@ -30,6 +40,12 @@ export interface CapabilityPromptContextRequest {
    * against the previous swipe's text.
    */
   regenerateMessageId?: string | null;
+  /**
+   * Capability API 1.839. Where the chat is on its World Maps map this turn (travel and swipes already resolved),
+   * when World Maps is added to the chat and its map belongs to this mode. A package that claims lorebooks should
+   * inject the linked entries itself, since a claim also skips them in the Engine's scan.
+   */
+  currentLocation?: CapabilityPromptContextLocation | null;
 }
 
 /** Built-in game systems an experience can declare it replaces. Open set — undeclared stays built-in. */

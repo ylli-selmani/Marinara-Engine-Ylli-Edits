@@ -744,6 +744,7 @@ import {
 } from "./generate/conversation-presence-runtime.js";
 import { resolveProfessorMariPromptContext } from "./generate/professor-mari-prompt-context.js";
 import {
+  capabilityPromptLocation,
   createClaimedLorebookRescan,
   injectCapabilityContexts,
 } from "../services/generation/capability-prompt-runtime.js";
@@ -5674,6 +5675,7 @@ export async function generateRoutes(app: FastifyInstance, options: GenerateRout
               placedAgentTypes: [...runtimeAgentSectionTypes],
               wrapFormat,
               regenerateMessageId: input.regenerateMessageId ?? null,
+              currentLocation: capabilityPromptLocation(await ownerSpatialProjectionPromise, "game"),
             },
             app.db,
             runtimeAgentSectionTokens,
@@ -6245,6 +6247,7 @@ export async function generateRoutes(app: FastifyInstance, options: GenerateRout
               placedAgentTypes: [...runtimeAgentSectionTypes],
               wrapFormat,
               regenerateMessageId: input.regenerateMessageId ?? null,
+              currentLocation: capabilityPromptLocation(await ownerSpatialProjectionPromise, chatMode),
             },
             app.db,
             runtimeAgentSectionTokens,
