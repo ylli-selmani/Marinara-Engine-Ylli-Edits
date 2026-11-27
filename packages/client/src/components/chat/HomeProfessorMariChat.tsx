@@ -57,7 +57,7 @@ import { characterKeys, useCharacterListRows, usePersonas } from "../../hooks/us
 import { getCharacterDisplayIdentity } from "../../lib/character-display";
 import { buildCharacterPreviewModel, type CharacterPreviewModel } from "../../lib/character-preview";
 import { buildLorebookPreviewModel } from "../../lib/lorebook-preview";
-import { completeInline } from "../../lib/inline-completion";
+import { completeInlineAt } from "../../lib/inline-completion";
 import { resolveMariRestStory, type MariStoryState } from "../../lib/mari-work-animations";
 import { lorebookKeys, useLorebooks } from "../../hooks/use-lorebooks";
 import { useMariComposerReferences } from "../../hooks/use-mari-composer-references";
@@ -427,10 +427,7 @@ export function HomeProfessorMariChat({
       ),
     [completionLorebooks.data],
   );
-  const draftSuffix = useMemo(() => completeInline(draft, completionCandidates), [completionCandidates, draft]);
-  const acceptDraftCompletion = useCallback(() => {
-    if (draftSuffix) setDraft((current) => current + draftSuffix);
-  }, [draftSuffix, setDraft]);
+  const draftCompletion = useMemo(() => completeInlineAt(draft, completionCandidates), [completionCandidates, draft]);
   const [attachments, setAttachments] = useState<ProfessorMariAttachment[]>([]);
   const [composerScroll, setComposerScroll] = useState({ left: 0, top: 0 });
   const [handoffContext, setHandoffContext] = useState<ProfessorMariAskContext | null>(() => initialAskContext ?? null);
@@ -1867,10 +1864,10 @@ export function HomeProfessorMariChat({
   // Scrolled up to read: a small round arrow above the composer brings you back to the newest line.
   // Same-value state updates bail out, so this re-renders only when the pill appears or leaves.
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
-  const transcriptGlideCleanupRef = useRef<(() => void) | null>(null);
+  const transcriptFollowRef = useRef<ReturnType<typeof followTranscriptGrowth> | null>(null);
   const setTranscriptStackNode = useCallback((node: HTMLDivElement | null) => {
-    transcriptGlideCleanupRef.current?.();
-    transcriptGlideCleanupRef.current = node?.parentElement
+    transcriptFollowRef.current?.stop();
+    transcriptFollowRef.current = node?.parentElement
       ? followTranscriptGrowth(
           node.parentElement,
           node,
@@ -1923,6 +1920,8 @@ export function HomeProfessorMariChat({
       following: transcriptFollowOutputRef.current,
     });
     transcriptFollowOutputRef.current = decision.following;
+    // A pin from just before the send (the question replacing her welcome) must not turn following back on.
+    transcriptFollowRef.current?.unpin();
     setShowJumpToLatest(false);
     if (decision.scrollTo === "top") {
       // Instant, not smooth: a multi-frame animation would fire more than the one "scroll" event the
@@ -2169,10 +2168,13 @@ export function HomeProfessorMariChat({
     setWorkspaceDestination(next ? "chats" : "chat");
   }, [chatHistoryOpen, isBusy, localizeUi]);
 
+  // Home closes the Home page's chat window. Her omnibar window is not that one: floating or docked (#9818) it stays
+  // open beside the app, and closing it here sent her back to the search.
   useEffect(() => {
+    if (omnibarMode) return;
     window.addEventListener("marinara:home-professor-mari-close", closeChatWindow);
     return () => window.removeEventListener("marinara:home-professor-mari-close", closeChatWindow);
-  }, [closeChatWindow]);
+  }, [closeChatWindow, omnibarMode]);
 
   // The omnibar can hand us a past conversation to open. The effect lives after
   // handleSelectProfessorChat so it can call it directly.
@@ -4057,7 +4059,6 @@ export function HomeProfessorMariChat({
                           onSendPendingNow={(id) => void sendPendingNow(id)}
                           workspaceStatus={workspaceStatus}
                           refreshWorkspaceStatus={refreshWorkspaceStatus}
-                          acceptDraftCompletion={acceptDraftCompletion}
                           attachComposerDock={attachComposerDock}
                           attachedContext={attachedContext}
                           attachmentInputRef={attachmentInputRef}
@@ -4071,7 +4072,8 @@ export function HomeProfessorMariChat({
                           connectionMenuRef={connectionMenuRef}
                           connectionOptions={connectionOptions}
                           draft={draft}
-                          draftSuffix={draftSuffix}
+                          draftSuffix={draftCompletion?.suffix ?? ""}
+                          draftSuffixStart={draftCompletion?.start ?? -1}
                           pickerOpen={composerReferences.pickerOpen}
                           onPickerAction={composerReferences.onPickerAction}
                           onActiveTokenChange={composerReferences.onActiveTokenChange}
@@ -4085,7 +4087,6 @@ export function HomeProfessorMariChat({
                           }}
                           referenceUi={{
                             ...composerReferences.referenceUi,
-                            canLinkCompletion: composerReferences.canLinkCompletion,
                           }}
                           effectiveConnection={effectiveConnection}
                           effectiveConnectionId={effectiveConnectionId}
