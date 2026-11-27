@@ -100,7 +100,7 @@ const chatSettingsMapsSource = [
   .join("\n");
 assert.match(
   chatSettingsMapsSource,
-  /const openLorebookFromSettings = useCallback\([\s\S]{0,220}closeForSurface\(\);[\s\S]{0,80}openLorebookDetail\(lorebookId\);/u,
+  /const openLorebookFromSettings = useCallback\([\s\S]{0,220}closeForSurface\(\);[\s\S]{0,80}openLorebookDetail\(lorebookId[,)]/u,
   "Opening linked Maps lore from Chat Settings must close the drawer before navigating",
 );
 assert.equal(
